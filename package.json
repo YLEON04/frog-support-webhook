@@ -1,0 +1,19 @@
+{
+  "name": "frog-support-webhook",
+  "version": "1.0.0",
+  "description": "Servidor webhook para Support Candy",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "keywords": ["support", "webhook", "tickets"],
+  "author": "Yaz",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2"
+  },
+  "engines": {
+    "node": "18"
+  }
+}
