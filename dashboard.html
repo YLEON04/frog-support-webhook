@@ -842,25 +842,25 @@ async function loadTickets(params) {
         const response = await fetch(`/api/tickets?${params}`);
         const tickets = await response.json();
 
-        let html = '<table><thead><tr><th>ID</th><th>Asunto</th><th>Estado</th><th>Prioridad</th><th>Agente</th><th>Cliente</th><th>Instancia</th><th>Creado</th><th>Actualizado</th></tr></thead><tbody>';
-
+        let html = '<table><thead><tr><th>ID</th><th>Asunto</th><th>Estado</th><th>Prioridad</th><th>Agente</th><th>Cliente</th><th>Categoría</th><th>Instancia</th><th>Creado</th><th>Actualizado</th></tr></thead><tbody>';
         tickets.forEach(t => {
           const statusClass = `status-${t.status.toLowerCase().replace(/\s+/g, '-')}`;
           const priorityClass = `priority-${t.priority.toLowerCase()}`;
 
           html += `
-            <tr onclick="openTimeline(${t.id})">
-              <td class="ticket-id">#${t.id}</td>
-              <td>${t.subject}</td>
-              <td><span class="status-badge ${statusClass}">${t.status}</span></td>
-              <td><span class="${priorityClass}">${t.priority}</span></td>
-              <td>${t.agent}</td>
-              <td>${t.customer}</td>
-              <td>${t.cust_26}</td>
-              <td>${t.created}</td>
-              <td>${t.updated}</td>
-            </tr>
-          `;
+          <tr onclick="openTimeline(${t.id})">
+            <td class="ticket-id">#${t.id}</td>
+            <td>${t.subject}</td>
+            <td><span class="status-badge ${statusClass}">${t.status}</span></td>
+            <td><span class="${priorityClass}">${t.priority}</span></td>
+            <td>${t.agent}</td>
+            <td>${t.customer}</td>
+            <td>${t.category}</td>
+            <td>${t.cust_26}</td>
+            <td>${t.created}</td>
+            <td>${t.updated}</td>
+          </tr>
+        `;
         });
 
         html += '</tbody></table>';
