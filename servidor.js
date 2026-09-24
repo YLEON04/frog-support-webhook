@@ -260,10 +260,13 @@ app.get('/api/tickets', async (req, res) => {
       FROM support_candy_tickets t
       LEFT JOIN sc_statuses s ON t.status = s.status_id
       LEFT JOIN sc_categories c ON t.category = c.category_id
-      LEFT JOIN sc_agents a ON t.assigned_agent::text LIKE '%' || a.agent_id::text || '%'
+      LEFT JOIN sc_agents a ON (
+        t.assigned_agent::text LIKE '%' || a.agent_id::text || '%' OR 
+        CAST(SPLIT_PART(t.assigned_agent::text, '|', 1) AS INTEGER) = a.agent_id
+      )
       WHERE a.agent_id IN (22, 23, 17, 5, 3) ${dateFilter}
-      ORDER BY t.ticket_id DESC, t.date_updated DESC
-      LIMIT 100
+      ORDER BY t.date_updated DESC
+      LIMIT 200
     `);
 
     const priorityMap = {
