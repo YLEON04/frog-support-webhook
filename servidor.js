@@ -243,7 +243,6 @@ app.get('/api/tickets-por-instancia', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
-
 // API: Obtener todos los tickets con detalles (SIN DUPLICADOS)
 app.get('/api/tickets', async (req, res) => {
   try {
@@ -255,16 +254,11 @@ app.get('/api/tickets', async (req, res) => {
         t.ticket_id, t.subject, t.status, t.priority, t.assigned_agent, t.category, t.customer,
         t.date_created, t.date_updated, t.date_closed, t.cust_26,
         s.status_name_es,
-        c.category_name,
-        a.agent_name
+        c.category_name
       FROM support_candy_tickets t
       LEFT JOIN sc_statuses s ON t.status = s.status_id
       LEFT JOIN sc_categories c ON t.category = c.category_id
-      LEFT JOIN sc_agents a ON (
-        t.assigned_agent::text LIKE '%' || a.agent_id::text || '%' OR 
-        CAST(SPLIT_PART(t.assigned_agent::text, '|', 1) AS INTEGER) = a.agent_id
-      )
-      WHERE a.agent_id IN (22, 23, 17, 5, 3) ${dateFilter}
+      WHERE t.ticket_id IS NOT NULL ${dateFilter}
       ORDER BY t.date_updated DESC
       LIMIT 200
     `);
@@ -273,20 +267,38 @@ app.get('/api/tickets', async (req, res) => {
       '1': 'Low', '2': 'Medium', '3': 'High', '4': 'Urgent'
     };
 
-    res.json(result.rows.map(t => ({
-      id: t.ticket_id,
-      subject: t.subject,
-      status: t.status_name_es || `Status ${t.status}`,
-      priority: priorityMap[t.priority] || `Priority ${t.priority}`,
-      agent: t.agent_name || 'Sin asignar',
-      category: t.category_name || '-',
-      customer: t.customer || '-',
-      cust_26: t.cust_26 || '-',
-      created: t.date_created ? new Date(t.date_created).toLocaleDateString('es-MX') : '-',
-      updated: t.date_updated ? new Date(t.date_updated).toLocaleDateString('es-MX') : '-'
-    })));
+    // Obtener nombre del agente por separado
+    const ticketsWithAgents = await Promise.all(result.rows.map(async (t) => {
+      let agentName = 'Sin asignar';
+      if (t.assigned_agent) {
+        const agentIds = t.assigned_agent.toString().split('|');
+        const firstAgentId = agentIds[0];
+        const agentResult = await pool.query(
+          'SELECT agent_name FROM sc_agents WHERE agent_id = $1',
+          [parseInt(firstAgentId)]
+        );
+        if (agentResult.rows.length > 0) {
+          agentName = agentResult.rows[0].agent_name;
+        }
+      }
+      return {
+        id: t.ticket_id,
+        subject: t.subject,
+        status: t.status_name_es || `Status ${t.status}`,
+        priority: priorityMap[t.priority] || `Priority ${t.priority}`,
+        agent: agentName,
+        category: t.category_name || '-',
+        customer: t.customer || '-',
+        cust_26: t.cust_26 || '-',
+        created: t.date_created ? new Date(t.date_created).toLocaleDateString('es-MX') : '-',
+        updated: t.date_updated ? new Date(t.date_updated).toLocaleDateString('es-MX') : '-'
+      };
+    }));
+
+    res.json(ticketsWithAgents);
 
   } catch (error) {
+    console.error('Error en /api/tickets:', error.message);
     res.status(500).json({ error: error.message });
   }
 });
