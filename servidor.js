@@ -143,7 +143,7 @@ app.get('/api/tickets-por-agente', async (req, res) => {
     const result = await pool.query(`
       SELECT a.agent_id, a.agent_name, COUNT(t.ticket_id) as cantidad
       FROM sc_agents a
-      LEFT JOIN support_candy_tickets t ON (t.assigned_agent::text LIKE '%' || a.agent_id::text || '%' OR CAST(t.assigned_agent AS INTEGER) = a.agent_id)
+      LEFT JOIN support_candy_tickets t ON t.assigned_agent::text LIKE '%' || a.agent_id::text || '%'
       GROUP BY a.agent_id, a.agent_name
       ORDER BY cantidad DESC
     `);
@@ -192,7 +192,7 @@ app.get('/api/tickets', async (req, res) => {
       FROM support_candy_tickets t
       LEFT JOIN sc_statuses s ON t.status = s.status_id
       LEFT JOIN sc_categories c ON t.category = c.category_id
-      LEFT JOIN sc_agents a ON (t.assigned_agent::text LIKE '%' || a.agent_id::text || '%' OR CAST(t.assigned_agent AS INTEGER) = a.agent_id)
+      LEFT JOIN sc_agents a ON t.assigned_agent::text LIKE '%' || a.agent_id::text || '%'
       ORDER BY t.date_updated DESC
       LIMIT 100
     `);
