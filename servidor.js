@@ -58,7 +58,7 @@ app.post('/webhook/support-candy', async (req, res) => {
         date_updated = $10,
         last_reply_on = $19,
         last_reply_by = $20,
-        previous_status = $50,
+        previous_status = $50,  
         new_status = $51,
         data_json = $52;
     `;
