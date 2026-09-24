@@ -259,7 +259,7 @@ app.get('/api/tickets', async (req, res) => {
       LEFT JOIN sc_statuses s ON t.status = s.status_id
       LEFT JOIN sc_categories c ON t.category = c.category_id
       WHERE t.ticket_id IS NOT NULL ${dateFilter}
-      ORDER BY t.date_updated DESC
+      ORDER BY t.ticket_id DESC, t.date_updated DESC
       LIMIT 200
     `);
 
