@@ -79,6 +79,17 @@ app.post('/webhook/support-candy', async (req, res) => {
     ];
 
     await pool.query(query, values);
+    
+    // GUARDAR EN HISTÓRICO
+    if (changeData.previous && changeData.new) {
+      const agentId = ticket.assigned_agent ? ticket.assigned_agent.toString().split('|')[0] : null;
+      await pool.query(
+        `INSERT INTO ticket_state_history (ticket_id, previous_status, new_status, agent_id) 
+         VALUES ($1, $2, $3, $4)`,
+        [ticket.id, changeData.previous, changeData.new, agentId]
+      );
+    }
+
     console.log('✅ Datos guardados en PostgreSQL');
     res.json({ success: true, message: 'Datos guardados correctamente' });
 
@@ -271,6 +282,83 @@ app.get('/api/tickets', async (req, res) => {
       created: t.date_created ? new Date(t.date_created).toLocaleDateString('es-MX') : '-',
       updated: t.date_updated ? new Date(t.date_updated).toLocaleDateString('es-MX') : '-'
     })));
+
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Obtener histórico de un ticket
+app.get('/api/ticket-timeline/:ticketId', async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+
+    const result = await pool.query(`
+      SELECT 
+        tsh.id,
+        tsh.ticket_id,
+        tsh.previous_status,
+        tsh.new_status,
+        tsh.agent_id,
+        tsh.changed_at,
+        s_prev.status_name_es as prev_status_name,
+        s_new.status_name_es as new_status_name,
+        a.agent_name,
+        t.date_created,
+        t.cust_26,
+        t.subject
+      FROM ticket_state_history tsh
+      LEFT JOIN sc_statuses s_prev ON tsh.previous_status = s_prev.status_id
+      LEFT JOIN sc_statuses s_new ON tsh.new_status = s_new.status_id
+      LEFT JOIN sc_agents a ON tsh.agent_id = a.agent_id
+      LEFT JOIN support_candy_tickets t ON tsh.ticket_id = t.ticket_id
+      WHERE tsh.ticket_id = $1
+      ORDER BY tsh.changed_at ASC
+    `, [ticketId]);
+
+    if (result.rows.length === 0) {
+      return res.json({ 
+        ticketId, 
+        timeline: [],
+        message: 'No hay histórico de cambios' 
+      });
+    }
+
+    const firstRow = result.rows[0];
+    const timeline = [];
+    let currentTime = new Date(firstRow.date_created);
+
+    // Agregar estado inicial
+    timeline.push({
+      status: 'Creado',
+      startTime: new Date(firstRow.date_created),
+      endTime: new Date(result.rows[0].changed_at),
+      agent: 'Sistema',
+      duration: Math.round((new Date(result.rows[0].changed_at) - new Date(firstRow.date_created)) / 3600000)
+    });
+
+    // Procesar cambios de estado
+    for (let i = 0; i < result.rows.length; i++) {
+      const row = result.rows[i];
+      const nextRow = result.rows[i + 1];
+      const endTime = nextRow ? new Date(nextRow.changed_at) : new Date();
+
+      timeline.push({
+        status: row.new_status_name || `Estado ${row.new_status}`,
+        startTime: new Date(row.changed_at),
+        endTime: endTime,
+        agent: row.agent_name || 'Sin asignar',
+        duration: Math.round((endTime - new Date(row.changed_at)) / 3600000)
+      });
+    }
+
+    res.json({
+      ticketId,
+      subject: firstRow.subject,
+      instance: firstRow.cust_26,
+      totalDuration: Math.round((timeline[timeline.length - 1].endTime - new Date(firstRow.date_created)) / 3600000),
+      timeline
+    });
 
   } catch (error) {
     res.status(500).json({ error: error.message });
