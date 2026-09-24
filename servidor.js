@@ -1,7 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const path = require('path');
-const mssql = require('mssql');
+const { Pool } = require('pg');
 const cors = require('cors');
 
 const app = express();
@@ -9,102 +9,111 @@ app.use(express.json());
 app.use(cors());
 app.use(express.static(__dirname));
 
-// Configuración SQL Server
-const sqlConfig = {
-  server: process.env.SQL_SERVER,
-  database: process.env.SQL_DATABASE,
-  authentication: {
-    type: 'default',
-    options: {
-      userName: process.env.SQL_USER,
-      password: process.env.SQL_PASSWORD
-    }
-  },
-  options: {
-    encrypt: true,
-    trustServerCertificate: true,
-    connectionTimeout: 30000,
-    requestTimeout: 30000,
-  }
-};
-
-// Crear tabla si no existe
-async function initDatabase() {
-  try {
-    const pool = new mssql.ConnectionPool(sqlConfig);
-    await pool.connect();
-    
-    const query = `
-      IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'SUPPORT_CANDY_TICKETS')
-      CREATE TABLE SUPPORT_CANDY_TICKETS (
-        ID INT PRIMARY KEY IDENTITY(1,1),
-        TICKET_ID NVARCHAR(50) UNIQUE,
-        STATUS NVARCHAR(20),
-        PRIORITY NVARCHAR(20),
-        SUBJECT NVARCHAR(500),
-        CUSTOMER_EMAIL NVARCHAR(100),
-        CREATED_AT DATETIME,
-        UPDATED_AT DATETIME,
-        MESSAGE_COUNT INT,
-        TAGS NVARCHAR(MAX),
-        DATA_JSON NVARCHAR(MAX),
-        INSERTED_AT DATETIME DEFAULT GETDATE()
-      );
-    `;
-    
-    await pool.request().query(query);
-    await pool.close();
-    console.log('✅ Base de datos verificada/creada');
-  } catch (error) {
-    console.warn('⚠️ Error en DB init:', error.message);
-  }
-}
+// Configuración PostgreSQL
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }
+});
 
 // WEBHOOK: Recibir datos de Support Candy
 app.post('/webhook/support-candy', async (req, res) => {
   try {
-    const ticket = req.body;
-    console.log('✅ Webhook recibido - Ticket:', ticket.id);
+    const data = req.body;
+    console.log('✅ Webhook recibido');
     
-    const pool = new mssql.ConnectionPool(sqlConfig);
-    await pool.connect();
-    
-    const request = pool.request();
-    request.input('ticket_id', mssql.VarChar(50), ticket.id || 'N/A');
-    request.input('status', mssql.VarChar(20), ticket.status || 'unknown');
-    request.input('priority', mssql.VarChar(20), ticket.priority || 'normal');
-    request.input('subject', mssql.VarChar(500), ticket.subject || '');
-    request.input('customer_email', mssql.VarChar(100), ticket.customer_email || '');
-    request.input('created_at', mssql.DateTime, ticket.created_at || new Date());
-    request.input('updated_at', mssql.DateTime, new Date());
-    request.input('message_count', mssql.Int, ticket.message_count || 0);
-    request.input('tags', mssql.NVarChar(mssql.MAX), JSON.stringify(ticket.tags || []));
-    request.input('data_json', mssql.NVarChar(mssql.MAX), JSON.stringify(ticket));
-    
+    if (!data.payload || !data.payload.ticket) {
+      console.log('⚠️ Estructura inválida');
+      return res.json({ success: false, message: 'Estructura inválida' });
+    }
+
+    const ticket = data.payload.ticket;
+    const changeData = data.payload.data || {};
+
     const query = `
-      MERGE INTO SUPPORT_CANDY_TICKETS AS target
-      USING (SELECT @ticket_id as TICKET_ID) AS source
-      ON target.TICKET_ID = source.TICKET_ID
-      WHEN MATCHED THEN
-        UPDATE SET 
-          STATUS = @status,
-          PRIORITY = @priority,
-          SUBJECT = @subject,
-          UPDATED_AT = @updated_at,
-          MESSAGE_COUNT = @message_count,
-          DATA_JSON = @data_json
-      WHEN NOT MATCHED THEN
-        INSERT (TICKET_ID, STATUS, PRIORITY, SUBJECT, CUSTOMER_EMAIL, CREATED_AT, UPDATED_AT, MESSAGE_COUNT, TAGS, DATA_JSON)
-        VALUES (@ticket_id, @status, @priority, @subject, @customer_email, @created_at, @updated_at, @message_count, @tags, @data_json);
+      INSERT INTO support_candy_tickets 
+      (ticket_id, is_active, customer, subject, status, priority, category, assigned_agent, 
+       date_created, date_updated, agent_created, ip_address, source, browser, os, prev_assignee, 
+       date_closed, user_type, last_reply_on, last_reply_by, last_reply_source, auth_code, tags, 
+       live_agents, misc, frd, ard, cd, cg, cust_26, cust_28, cust_29, cust_30, cust_31, cust_32, 
+       cust_33, cust_34, pin, rating, sf_feedback, sf_date, sla, od_count, od_email, sla_policy, 
+       time_spent, cust_40, cust_41, cust_42, previous_status, new_status, data_json)
+      VALUES 
+      ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 
+       $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36,
+       $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52)
+      ON CONFLICT (ticket_id) DO UPDATE SET
+        status = $5,
+        priority = $6,
+        subject = $4,
+        date_updated = $10,
+        last_reply_on = $19,
+        last_reply_by = $20,
+        previous_status = $51,
+        new_status = $52,
+        data_json = $52;
     `;
-    
-    await request.query(query);
-    await pool.close();
-    
+
+    const values = [
+      ticket.id,
+      ticket.is_active || 0,
+      ticket.customer || null,
+      ticket.subject || '',
+      ticket.status || null,
+      ticket.priority || null,
+      ticket.category || null,
+      ticket.assigned_agent || null,
+      ticket.date_created || new Date(),
+      ticket.date_updated || new Date(),
+      ticket.agent_created || null,
+      ticket.ip_address || '',
+      ticket.source || '',
+      ticket.browser || '',
+      ticket.os || '',
+      ticket.prev_assignee || '',
+      ticket.date_closed || null,
+      ticket.user_type || '',
+      ticket.last_reply_on || null,
+      ticket.last_reply_by || null,
+      ticket.last_reply_source || '',
+      ticket.auth_code || '',
+      ticket.tags || '',
+      ticket.live_agents || '',
+      ticket.misc || '',
+      ticket.frd || null,
+      ticket.ard || null,
+      ticket.cd || null,
+      ticket.cg || null,
+      ticket.cust_26 || '',
+      ticket.cust_28 || '',
+      ticket.cust_29 || '',
+      ticket.cust_30 || '',
+      ticket.cust_31 || '',
+      ticket.cust_32 || '',
+      ticket.cust_33 || '',
+      ticket.cust_34 || null,
+      ticket.pin || 0,
+      ticket.rating || 0,
+      ticket.sf_feedback || '',
+      ticket.sf_date || null,
+      ticket.sla || null,
+      ticket.od_count || 0,
+      ticket.od_email || 0,
+      ticket.sla_policy || 0,
+      ticket.time_spent || '',
+      ticket.cust_40 || null,
+      ticket.cust_41 || null,
+      ticket.cust_42 || '',
+      changeData.previous || null,
+      changeData.new || null,
+      JSON.stringify(data)
+    ];
+
+    await pool.query(query, values);
+    console.log('✅ Datos guardados en PostgreSQL');
     res.json({ success: true, message: 'Datos guardados correctamente' });
-    
+
   } catch (error) {
-    console.error('❌ Error en webhook:', error.message);
+    console.error('❌ Error:', error.message);
     res.status(500).json({ error: error.message });
   }
 });
@@ -112,42 +121,33 @@ app.post('/webhook/support-candy', async (req, res) => {
 // API: Obtener estadísticas
 app.get('/api/stats', async (req, res) => {
   try {
-    const pool = new mssql.ConnectionPool(sqlConfig);
-    await pool.connect();
-    
-    const result = await pool.request().query(`
+    const result = await pool.query(`
       SELECT 
-        ISNULL(STATUS, 'unknown') as STATUS,
-        COUNT(*) as CANTIDAD,
-        CAST(AVG(CAST(DATEDIFF(HOUR, CREATED_AT, UPDATED_AT) AS FLOAT)) AS INT) as AVG_HOURS
-      FROM SUPPORT_CANDY_TICKETS
-      WHERE CREATED_AT > DATEADD(DAY, -30, GETDATE())
-      GROUP BY STATUS
-      ORDER BY CANTIDAD DESC
+        status,
+        COUNT(*) as cantidad
+      FROM support_candy_tickets
+      GROUP BY status
+      ORDER BY cantidad DESC
     `);
-    
-    await pool.close();
-    
-    const recordset = result.recordset || [];
-    const open = recordset.find(r => r.STATUS === 'open')?.CANTIDAD || 0;
-    const closed = recordset.find(r => r.STATUS === 'closed')?.CANTIDAD || 0;
-    const avgHours = recordset[0]?.AVG_HOURS || 0;
-    
+
+    const statusMap = {
+      '1': 'New',
+      '2': 'Open',
+      '3': 'On Hold',
+      '4': 'Waiting for Customer',
+      '5': 'Closed',
+      '6': 'Spam'
+    };
+
     res.json({
-      open,
-      closed,
-      avgHours,
-      statusLabels: recordset.map(r => r.STATUS.toUpperCase()),
-      statusCounts: recordset.map(r => r.CANTIDAD)
+      statusLabels: result.rows.map(r => statusMap[r.status] || `Status ${r.status}`),
+      statusCounts: result.rows.map(r => parseInt(r.cantidad))
     });
-    
+
   } catch (error) {
     console.error('❌ Error en API:', error.message);
     res.status(500).json({ 
       error: error.message,
-      open: 0,
-      closed: 0,
-      avgHours: 0,
       statusLabels: [],
       statusCounts: []
     });
@@ -164,11 +164,7 @@ app.get('/health', (req, res) => {
   res.json({ status: 'OK' });
 });
 
-// Inicializar y arrancar
 const PORT = process.env.PORT || 3000;
-initDatabase().then(() => {
-  app.listen(PORT, () => {
-    console.log(`🚀 Servidor corriendo en puerto ${PORT}`);
-    console.log(`📊 Dashboard en: http://localhost:${PORT}`);
-  });
+app.listen(PORT, () => {
+  console.log(`🚀 Servidor corriendo en puerto ${PORT}`);
 });
