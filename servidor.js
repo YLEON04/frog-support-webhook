@@ -15,6 +15,14 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false }
 });
 
+// Helper para convertir fechas inválidas a null
+const fixDate = (dateStr) => {
+  if (!dateStr || dateStr === '0000-00-00 00:00:00' || dateStr === '0000-00-00') {
+    return null;
+  }
+  return dateStr;
+};
+
 // WEBHOOK: Recibir datos de Support Candy
 app.post('/webhook/support-candy', async (req, res) => {
   try {
@@ -63,17 +71,17 @@ app.post('/webhook/support-candy', async (req, res) => {
       ticket.priority || null,
       ticket.category || null,
       ticket.assigned_agent || null,
-      ticket.date_created || new Date(),
-      ticket.date_updated || new Date(),
+      fixDate(ticket.date_created),
+      fixDate(ticket.date_updated),
       ticket.agent_created || null,
       ticket.ip_address || '',
       ticket.source || '',
       ticket.browser || '',
       ticket.os || '',
       ticket.prev_assignee || '',
-      ticket.date_closed || null,
+      fixDate(ticket.date_closed),
       ticket.user_type || '',
-      ticket.last_reply_on || null,
+      fixDate(ticket.last_reply_on),
       ticket.last_reply_by || null,
       ticket.last_reply_source || '',
       ticket.auth_code || '',
@@ -91,12 +99,12 @@ app.post('/webhook/support-candy', async (req, res) => {
       ticket.cust_31 || '',
       ticket.cust_32 || '',
       ticket.cust_33 || '',
-      ticket.cust_34 || null,
+      fixDate(ticket.cust_34),
       ticket.pin || 0,
       ticket.rating || 0,
       ticket.sf_feedback || '',
-      ticket.sf_date || null,
-      ticket.sla || null,
+      fixDate(ticket.sf_date),
+      fixDate(ticket.sla),
       ticket.od_count || 0,
       ticket.od_email || 0,
       ticket.sla_policy || 0,
