@@ -21,13 +21,14 @@ app.post('/webhook/support-candy', async (req, res) => {
     const data = req.body;
     console.log('✅ Webhook recibido');
     
-    if (!data.payload || !data.payload.ticket) {
-      console.log('⚠️ Estructura inválida');
+    // El webhook puede llegar directamente o dentro de payload
+    const ticket = data.ticket || (data.payload && data.payload.ticket);
+    const changeData = data.data || (data.payload && data.payload.data) || {};
+
+    if (!ticket) {
+      console.log('⚠️ Estructura inválida - no hay ticket');
       return res.json({ success: false, message: 'Estructura inválida' });
     }
-
-    const ticket = data.payload.ticket;
-    const changeData = data.payload.data || {};
 
     const query = `
       INSERT INTO support_candy_tickets 
