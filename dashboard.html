@@ -446,6 +446,7 @@
       margin-top: 20px;
       font-weight: bold;
       color: #667eea;
+      font-size: 16px;
     }
 
     .no-history {
@@ -726,7 +727,7 @@
         const data = await response.json();
 
         document.getElementById('modalTicketId').textContent = `Ticket #${data.ticketId}`;
-        document.getElementById('modalTicketMeta').textContent = `${data.subject} • Instancia: ${data.instance} • Duración total: ${data.totalDuration}h`;
+        document.getElementById('modalTicketMeta').textContent = `${data.subject} • Instancia: ${data.instance} • Duración total: ${data.totalDurationFormatted}`;
 
         if (data.timeline.length === 0) {
           document.getElementById('timelineContent').innerHTML = '<div class="no-history">No hay histórico de cambios disponible</div>';
@@ -742,14 +743,14 @@
               <div class="timeline-content">
                 <div class="timeline-status">${item.status}</div>
                 <div class="timeline-agent">👤 ${item.agent}</div>
-                <div class="timeline-duration">⏱️ ${item.duration}h</div>
+                <div class="timeline-duration">⏱️ ${item.durationFormatted}</div>
               </div>
             </div>
           `;
         });
 
         timelineHtml += '</div>';
-        timelineHtml += `<div class="total-duration">⏱️ TOTAL: ${data.totalDuration} horas</div>`;
+        timelineHtml += `<div class="total-duration">⏱️ TOTAL: ${data.totalDurationFormatted}</div>`;
 
         document.getElementById('timelineContent').innerHTML = timelineHtml;
       } catch (error) {

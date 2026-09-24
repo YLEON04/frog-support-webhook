@@ -302,7 +302,6 @@ app.get('/api/tickets', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
-
 // API: Obtener histórico de un ticket
 app.get('/api/ticket-timeline/:ticketId', async (req, res) => {
   try {
@@ -341,37 +340,61 @@ app.get('/api/ticket-timeline/:ticketId', async (req, res) => {
 
     const firstRow = result.rows[0];
     const timeline = [];
-    let currentTime = new Date(firstRow.date_created);
+
+    // Helper para convertir segundos a formato legible
+    const formatDuration = (seconds) => {
+      const hours = Math.floor(seconds / 3600);
+      const minutes = Math.floor((seconds % 3600) / 60);
+      const secs = seconds % 60;
+      
+      let result = '';
+      if (hours > 0) result += `${hours}h `;
+      if (minutes > 0) result += `${minutes}m `;
+      if (secs > 0 || result === '') result += `${secs}s`;
+      
+      return result.trim();
+    };
 
     // Agregar estado inicial
+    const firstChangeTime = new Date(result.rows[0].changed_at);
+    const createdTime = new Date(firstRow.date_created);
+    const initialDurationSeconds = Math.floor((firstChangeTime - createdTime) / 1000);
+
     timeline.push({
       status: 'Creado',
-      startTime: new Date(firstRow.date_created),
-      endTime: new Date(result.rows[0].changed_at),
+      startTime: createdTime,
+      endTime: firstChangeTime,
       agent: 'Sistema',
-      duration: Math.round((new Date(result.rows[0].changed_at) - new Date(firstRow.date_created)) / 3600000)
+      durationSeconds: initialDurationSeconds,
+      durationFormatted: formatDuration(initialDurationSeconds)
     });
 
     // Procesar cambios de estado
     for (let i = 0; i < result.rows.length; i++) {
       const row = result.rows[i];
       const nextRow = result.rows[i + 1];
+      const startTime = new Date(row.changed_at);
       const endTime = nextRow ? new Date(nextRow.changed_at) : new Date();
+      const durationSeconds = Math.floor((endTime - startTime) / 1000);
 
       timeline.push({
         status: row.new_status_name || `Estado ${row.new_status}`,
-        startTime: new Date(row.changed_at),
+        startTime: startTime,
         endTime: endTime,
         agent: row.agent_name || 'Sin asignar',
-        duration: Math.round((endTime - new Date(row.changed_at)) / 3600000)
+        durationSeconds: durationSeconds,
+        durationFormatted: formatDuration(durationSeconds)
       });
     }
+
+    const totalDurationSeconds = Math.floor((timeline[timeline.length - 1].endTime - createdTime) / 1000);
 
     res.json({
       ticketId,
       subject: firstRow.subject,
       instance: firstRow.cust_26,
-      totalDuration: Math.round((timeline[timeline.length - 1].endTime - new Date(firstRow.date_created)) / 3600000),
+      totalDurationSeconds: totalDurationSeconds,
+      totalDurationFormatted: formatDuration(totalDurationSeconds),
       timeline
     });
 
