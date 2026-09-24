@@ -88,9 +88,21 @@ app.post('/webhook/support-candy', async (req, res) => {
   }
 });
 
+// Función helper para construir WHERE con filtro de fechas
+const getDateFilter = (startDate, endDate) => {
+  let filter = '';
+  if (startDate && endDate) {
+    filter = ` AND t.date_updated >= '${startDate}' AND t.date_updated <= '${endDate} 23:59:59'`;
+  }
+  return filter;
+};
+
 // API: Obtener KPIs principales
 app.get('/api/kpis', async (req, res) => {
   try {
+    const { startDate, endDate } = req.query;
+    const dateFilter = getDateFilter(startDate, endDate);
+
     const result = await pool.query(`
       SELECT
         COUNT(*) FILTER (WHERE status IN (1,2,3,4)) as tickets_abiertos,
@@ -100,7 +112,7 @@ app.get('/api/kpis', async (req, res) => {
         ROUND(AVG(EXTRACT(EPOCH FROM (COALESCE(date_closed, date_updated) - date_created)) / 3600)::numeric, 1) as tiempo_promedio_horas
       FROM support_candy_tickets t
       LEFT JOIN sc_agents a ON t.assigned_agent::text LIKE '%' || a.agent_id::text || '%'
-      WHERE a.agent_id IN (22, 23, 17, 5, 3)
+      WHERE a.agent_id IN (22, 23, 17, 5, 3) ${dateFilter}
     `);
 
     const row = result.rows[0];
@@ -121,12 +133,15 @@ app.get('/api/kpis', async (req, res) => {
 // API: Obtener tickets por estado
 app.get('/api/tickets-por-estado', async (req, res) => {
   try {
+    const { startDate, endDate } = req.query;
+    const dateFilter = getDateFilter(startDate, endDate);
+
     const result = await pool.query(`
       SELECT s.status_id, s.status_name_es, COUNT(DISTINCT t.ticket_id) as cantidad
       FROM sc_statuses s
       LEFT JOIN support_candy_tickets t ON t.status = s.status_id
       LEFT JOIN sc_agents a ON t.assigned_agent::text LIKE '%' || a.agent_id::text || '%'
-      WHERE a.agent_id IN (22, 23, 17, 5, 3) OR t.ticket_id IS NULL
+      WHERE (a.agent_id IN (22, 23, 17, 5, 3) OR t.ticket_id IS NULL) ${dateFilter}
       GROUP BY s.status_id, s.status_name_es
       ORDER BY s.status_id ASC
     `);
@@ -144,11 +159,14 @@ app.get('/api/tickets-por-estado', async (req, res) => {
 // API: Obtener tickets por agente
 app.get('/api/tickets-por-agente', async (req, res) => {
   try {
+    const { startDate, endDate } = req.query;
+    const dateFilter = getDateFilter(startDate, endDate);
+
     const result = await pool.query(`
       SELECT a.agent_id, a.agent_name, COUNT(DISTINCT t.ticket_id) as cantidad
       FROM sc_agents a
       LEFT JOIN support_candy_tickets t ON t.assigned_agent::text LIKE '%' || a.agent_id::text || '%'
-      WHERE a.agent_id IN (22, 23, 17, 5, 3)
+      WHERE a.agent_id IN (22, 23, 17, 5, 3) ${dateFilter}
       GROUP BY a.agent_id, a.agent_name
       ORDER BY cantidad DESC
     `);
@@ -166,12 +184,15 @@ app.get('/api/tickets-por-agente', async (req, res) => {
 // API: Obtener tickets por categoría
 app.get('/api/tickets-por-categoria', async (req, res) => {
   try {
+    const { startDate, endDate } = req.query;
+    const dateFilter = getDateFilter(startDate, endDate);
+
     const result = await pool.query(`
       SELECT c.category_id, c.category_name, COUNT(DISTINCT t.ticket_id) as cantidad
       FROM sc_categories c
       LEFT JOIN support_candy_tickets t ON t.category = c.category_id
       LEFT JOIN sc_agents a ON t.assigned_agent::text LIKE '%' || a.agent_id::text || '%'
-      WHERE a.agent_id IN (22, 23, 17, 5, 3)
+      WHERE a.agent_id IN (22, 23, 17, 5, 3) ${dateFilter}
       GROUP BY c.category_id, c.category_name
       ORDER BY cantidad DESC
     `);
@@ -189,6 +210,9 @@ app.get('/api/tickets-por-categoria', async (req, res) => {
 // API: Obtener todos los tickets con detalles (SIN DUPLICADOS)
 app.get('/api/tickets', async (req, res) => {
   try {
+    const { startDate, endDate } = req.query;
+    const dateFilter = getDateFilter(startDate, endDate);
+
     const result = await pool.query(`
       SELECT DISTINCT ON (t.ticket_id)
         t.ticket_id, t.subject, t.status, t.priority, t.assigned_agent, t.category, t.customer,
@@ -200,7 +224,7 @@ app.get('/api/tickets', async (req, res) => {
       LEFT JOIN sc_statuses s ON t.status = s.status_id
       LEFT JOIN sc_categories c ON t.category = c.category_id
       LEFT JOIN sc_agents a ON t.assigned_agent::text LIKE '%' || a.agent_id::text || '%'
-      WHERE a.agent_id IN (22, 23, 17, 5, 3)
+      WHERE a.agent_id IN (22, 23, 17, 5, 3) ${dateFilter}
       ORDER BY t.ticket_id DESC, t.date_updated DESC
       LIMIT 100
     `);
