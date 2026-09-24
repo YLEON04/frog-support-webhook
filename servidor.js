@@ -207,6 +207,32 @@ app.get('/api/tickets-por-categoria', async (req, res) => {
   }
 });
 
+// API: Obtener tickets por instancia
+app.get('/api/tickets-por-instancia', async (req, res) => {
+  try {
+    const { startDate, endDate } = req.query;
+    const dateFilter = getDateFilter(startDate, endDate);
+
+    const result = await pool.query(`
+      SELECT t.cust_26, COUNT(DISTINCT t.ticket_id) as cantidad
+      FROM support_candy_tickets t
+      LEFT JOIN sc_agents a ON t.assigned_agent::text LIKE '%' || a.agent_id::text || '%'
+      WHERE a.agent_id IN (22, 23, 17, 5, 3) AND t.cust_26 IS NOT NULL AND t.cust_26 != '' ${dateFilter}
+      GROUP BY t.cust_26
+      ORDER BY cantidad DESC
+      LIMIT 20
+    `);
+
+    res.json({
+      labels: result.rows.map(r => r.cust_26),
+      data: result.rows.map(r => parseInt(r.cantidad || 0))
+    });
+
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // API: Obtener todos los tickets con detalles (SIN DUPLICADOS)
 app.get('/api/tickets', async (req, res) => {
   try {
