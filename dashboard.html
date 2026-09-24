@@ -726,9 +726,17 @@ function filterTicketsByAgent(agent) {
   const rows = table.querySelectorAll('tr');
   let visibleCount = 0;
 
+  // Normalizar el agente del filtro (remover acentos, lowercase)
+  const normalizedFilter = agent.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
   rows.forEach(row => {
     const agentCell = row.cells[4]; // Columna AGENTE
-    if (agentCell.textContent.trim() === agent) {
+    const cellText = agentCell.textContent.trim();
+    
+    // Normalizar el texto de la celda igual
+    const normalizedCell = cellText.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    
+    if (normalizedCell === normalizedFilter) {
       row.style.display = '';
       visibleCount++;
     } else {
