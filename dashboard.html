@@ -768,18 +768,35 @@ function filterTicketsByStatus(status) {
 
   updateFilterBadge(`Estado: ${status}`, visibleCount);
 }
-
 function filterTicketsByCategory(category) {
   const table = document.querySelector('table tbody');
   const rows = table.querySelectorAll('tr');
   let visibleCount = 0;
 
+  const normalizedFilter = category.toLowerCase().trim();
+
   rows.forEach(row => {
-    row.style.display = '';
-    visibleCount++;
+    const categoryCell = row.cells[9]; // Columna CATEGORIA (ajusta si es diferente)
+    
+    // Si la celda no existe, buscar en todas las celdas
+    let found = false;
+    for (let i = 0; i < row.cells.length; i++) {
+      const cellText = row.cells[i].textContent.trim().toLowerCase();
+      if (cellText === normalizedFilter && i !== 0) { // excluir columna ID
+        found = true;
+        break;
+      }
+    }
+
+    if (found) {
+      row.style.display = '';
+      visibleCount++;
+    } else {
+      row.style.display = 'none';
+    }
   });
 
-  updateFilterBadge(`Filtro limpiado`, visibleCount);
+  updateFilterBadge(`Categoría: ${category}`, visibleCount);
 }
 
 function updateFilterBadge(filterText, count) {
