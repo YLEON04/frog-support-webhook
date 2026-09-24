@@ -1,384 +1,566 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Support Candy Dashboard · Frog ADN CAU</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
-<style>
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body { 
-  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  min-height: 100vh;
-  padding: 20px;
-}
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Support Candy Dashboard - CAU</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
 
-.container {
-  max-width: 1400px;
-  margin: 0 auto;
-  background: white;
-  border-radius: 12px;
-  box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-  overflow: hidden;
-}
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      padding: 20px;
+    }
 
-.header {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
-  padding: 30px;
-  text-align: center;
-}
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+      overflow: hidden;
+    }
 
-.header h1 { font-size: 28px; margin-bottom: 5px; }
-.header p { opacity: 0.9; font-size: 14px; }
+    header {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 30px;
+      text-align: center;
+    }
 
-.kpis {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 20px;
-  padding: 30px;
-  border-bottom: 1px solid #eee;
-  background: #f8f9fa;
-}
+    h1 {
+      font-size: 28px;
+      margin-bottom: 10px;
+    }
 
-.kpi-card {
-  background: white;
-  padding: 20px;
-  border-radius: 10px;
-  border-left: 4px solid #667eea;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-}
+    .subtitle {
+      font-size: 14px;
+      opacity: 0.9;
+    }
 
-.kpi-label { font-size: 12px; color: #666; text-transform: uppercase; letter-spacing: 1px; }
-.kpi-value { font-size: 32px; font-weight: bold; color: #667eea; margin-top: 10px; }
+    /* Date Range Picker */
+    .date-range-container {
+      background: #f8f9fa;
+      padding: 20px;
+      border-bottom: 1px solid #ddd;
+      display: flex;
+      gap: 15px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
 
-.kpi-card.closed { border-left-color: #28a745; }
-.kpi-card.closed .kpi-value { color: #28a745; }
+    .date-inputs {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
 
-.kpi-card.spam { border-left-color: #dc3545; }
-.kpi-card.spam .kpi-value { color: #dc3545; }
+    .date-inputs input {
+      padding: 8px 12px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      font-size: 14px;
+    }
 
-.content {
-  padding: 30px;
-}
+    .date-presets {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
 
-.section {
-  margin-bottom: 40px;
-}
+    .preset-btn {
+      padding: 8px 16px;
+      background: #667eea;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+      transition: all 0.3s;
+    }
 
-.section-title {
-  font-size: 18px;
-  font-weight: bold;
-  color: #333;
-  margin-bottom: 20px;
-  padding-bottom: 10px;
-  border-bottom: 2px solid #667eea;
-}
+    .preset-btn:hover {
+      background: #764ba2;
+      transform: translateY(-2px);
+    }
 
-.charts-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
-  gap: 20px;
-}
+    .preset-btn.active {
+      background: #764ba2;
+      box-shadow: 0 4px 12px rgba(118, 75, 162, 0.3);
+    }
 
-.chart-container {
-  background: white;
-  border-radius: 10px;
-  padding: 20px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-  position: relative;
-  height: 400px;
-}
+    .refresh-btn {
+      padding: 8px 16px;
+      background: #28a745;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-weight: 500;
+      transition: all 0.3s;
+    }
 
-.chart-canvas {
-  position: relative;
-  height: 350px;
-}
+    .refresh-btn:hover {
+      background: #218838;
+      transform: translateY(-2px);
+    }
 
-.table-container {
-  background: white;
-  border-radius: 10px;
-  padding: 20px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-  overflow-x: auto;
-}
+    .error-alert {
+      background: #f8d7da;
+      color: #721c24;
+      padding: 15px;
+      border-radius: 6px;
+      border: 1px solid #f5c6cb;
+      margin: 20px;
+      display: none;
+    }
 
-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
-}
+    .error-alert.show {
+      display: block;
+    }
 
-th {
-  background: #f8f9fa;
-  padding: 12px;
-  text-align: left;
-  font-weight: 600;
-  color: #333;
-  border-bottom: 2px solid #ddd;
-}
+    /* KPIs */
+    .kpis {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 20px;
+      padding: 30px;
+      background: #f8f9fa;
+      border-bottom: 1px solid #ddd;
+    }
 
-td {
-  padding: 12px;
-  border-bottom: 1px solid #eee;
-}
+    .kpi-card {
+      background: white;
+      padding: 20px;
+      border-radius: 10px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+      text-align: center;
+    }
 
-tr:hover { background: #f8f9fa; }
+    .kpi-value {
+      font-size: 32px;
+      font-weight: bold;
+      color: #667eea;
+      margin: 10px 0;
+    }
 
-.status-badge {
-  display: inline-block;
-  padding: 4px 10px;
-  border-radius: 20px;
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-}
+    .kpi-label {
+      font-size: 13px;
+      color: #666;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
 
-.status-open { background: #e3f2fd; color: #1976d2; }
-.status-closed { background: #e8f5e9; color: #388e3c; }
-.status-hold { background: #fff3e0; color: #f57c00; }
-.status-spam { background: #ffebee; color: #d32f2f; }
+    /* Charts Section */
+    .charts-section {
+      padding: 30px;
+    }
 
-.priority-high { color: #d32f2f; font-weight: bold; }
-.priority-medium { color: #f57c00; font-weight: bold; }
-.priority-low { color: #388e3c; font-weight: bold; }
+    .section-title {
+      font-size: 18px;
+      font-weight: bold;
+      color: #333;
+      margin-bottom: 20px;
+      padding-bottom: 10px;
+      border-bottom: 2px solid #667eea;
+    }
 
-.footer {
-  background: #f8f9fa;
-  padding: 20px;
-  text-align: center;
-  border-top: 1px solid #ddd;
-  font-size: 12px;
-  color: #666;
-}
+    .charts-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+      gap: 25px;
+      margin-bottom: 40px;
+    }
 
-.loading {
-  text-align: center;
-  padding: 40px;
-  color: #999;
-}
+    .chart-container {
+      background: white;
+      padding: 20px;
+      border-radius: 10px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+      position: relative;
+      height: 350px;
+    }
 
-.error {
-  background: #ffebee;
-  color: #d32f2f;
-  padding: 15px;
-  border-radius: 8px;
-  margin: 20px;
-}
+    .chart-container h3 {
+      font-size: 16px;
+      color: #333;
+      margin-bottom: 15px;
+    }
 
-button {
-  background: #667eea;
-  color: white;
-  border: none;
-  padding: 10px 20px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 14px;
-  font-weight: 600;
-}
+    .chart-container canvas {
+      max-height: 300px;
+    }
 
-button:hover { background: #5568d3; }
+    /* Tickets Table */
+    .tickets-section {
+      padding: 30px;
+      background: #f8f9fa;
+    }
 
-.refresh-btn {
-  float: right;
-  margin-bottom: 20px;
-}
-</style>
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: white;
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    }
+
+    th {
+      background: #667eea;
+      color: white;
+      padding: 15px;
+      text-align: left;
+      font-weight: 600;
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    td {
+      padding: 12px 15px;
+      border-bottom: 1px solid #eee;
+      font-size: 13px;
+    }
+
+    tr:hover {
+      background: #f5f5f5;
+    }
+
+    tr:last-child td {
+      border-bottom: none;
+    }
+
+    .status-badge {
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+
+    .status-open {
+      background: #d1ecf1;
+      color: #0c5460;
+    }
+
+    .status-closed {
+      background: #d4edda;
+      color: #155724;
+    }
+
+    .status-on-hold {
+      background: #fff3cd;
+      color: #856404;
+    }
+
+    .status-spam {
+      background: #f8d7da;
+      color: #721c24;
+    }
+
+    .priority-high {
+      color: #dc3545;
+      font-weight: bold;
+    }
+
+    .priority-medium {
+      color: #ffc107;
+      font-weight: bold;
+    }
+
+    .priority-low {
+      color: #28a745;
+      font-weight: bold;
+    }
+
+    .loading {
+      text-align: center;
+      padding: 40px;
+      color: #667eea;
+      font-size: 16px;
+    }
+
+    .spinner {
+      border: 4px solid #f3f3f3;
+      border-top: 4px solid #667eea;
+      border-radius: 50%;
+      width: 40px;
+      height: 40px;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 20px;
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    .ticket-id {
+      font-weight: bold;
+      color: #667eea;
+    }
+  </style>
 </head>
 <body>
+  <div class="container">
+    <header>
+      <h1>📊 Support Candy Dashboard</h1>
+      <p class="subtitle">CAU - Centro de Atención a Usuarios</p>
+    </header>
 
-<div class="container">
-  <div class="header">
-    <h1>📊 Support Candy Dashboard</h1>
-    <p>Sistema de monitoreo en tiempo real · Frog ADN CAU</p>
-  </div>
-
-  <div class="content">
-    <button class="refresh-btn" onclick="loadData()">🔄 Actualizar ahora</button>
-
-    <!-- KPIs -->
-    <div class="kpis" id="kpis-container">
-      <div class="loading">Cargando KPIs...</div>
+    <div class="date-range-container">
+      <div class="date-inputs">
+        <label>Desde:</label>
+        <input type="date" id="startDate">
+        <label>Hasta:</label>
+        <input type="date" id="endDate">
+      </div>
+      <div class="date-presets">
+        <button class="preset-btn active" onclick="setPreset('thisWeek')">Esta semana</button>
+        <button class="preset-btn" onclick="setPreset('lastWeek')">Última semana</button>
+        <button class="preset-btn" onclick="setPreset('thisMonth')">Este mes</button>
+        <button class="preset-btn" onclick="setPreset('allTime')">Todo</button>
+      </div>
+      <button class="refresh-btn" onclick="loadData()">🔄 Actualizar</button>
     </div>
 
-    <!-- Gráficas -->
-    <div class="section">
+    <div class="error-alert" id="errorAlert"></div>
+
+    <div class="kpis" id="kpisContainer">
+      <div class="loading"><div class="spinner"></div>Cargando KPIs...</div>
+    </div>
+
+    <div class="charts-section">
       <h2 class="section-title">📈 Distribuciones</h2>
       <div class="charts-grid">
         <div class="chart-container">
-          <h3 style="margin-bottom: 15px; font-size: 14px;">Tickets por Estado</h3>
-          <div class="chart-canvas">
-            <canvas id="chart-estado"></canvas>
-          </div>
+          <h3>Tickets por Estado</h3>
+          <canvas id="estadoChart"></canvas>
         </div>
         <div class="chart-container">
-          <h3 style="margin-bottom: 15px; font-size: 14px;">Tickets por Agente</h3>
-          <div class="chart-canvas">
-            <canvas id="chart-agente"></canvas>
-          </div>
+          <h3>Tickets por Agente</h3>
+          <canvas id="agenteChart"></canvas>
         </div>
         <div class="chart-container">
-          <h3 style="margin-bottom: 15px; font-size: 14px;">Tickets por Categoría</h3>
-          <div class="chart-canvas">
-            <canvas id="chart-categoria"></canvas>
-          </div>
+          <h3>Tickets por Categoría</h3>
+          <canvas id="categoriaChart"></canvas>
         </div>
       </div>
     </div>
 
-    <!-- Tabla de tickets -->
-    <div class="section">
+    <div class="tickets-section">
       <h2 class="section-title">📋 Últimos Tickets</h2>
-      <div class="table-container">
-        <table id="tickets-table">
-          <thead>
-            <tr>
-              <th>ID</th>
-              <th>Asunto</th>
-              <th>Estado</th>
-              <th>Prioridad</th>
-              <th>Agente</th>
-              <th>Cliente</th>
-              <th>Creado</th>
-              <th>Actualizado</th>
-            </tr>
-          </thead>
-          <tbody id="tickets-body">
-            <tr><td colspan="8" style="text-align: center; padding: 40px;">Cargando tickets...</td></tr>
-          </tbody>
-        </table>
+      <div id="ticketsContainer">
+        <div class="loading"><div class="spinner"></div>Cargando tickets...</div>
       </div>
     </div>
   </div>
 
-  <div class="footer">
-    Se actualiza automáticamente cada 30 segundos · Última actualización: <span id="last-update">-</span>
-  </div>
-</div>
+  <script>
+    let charts = {};
+    let activePreset = 'thisWeek';
 
-<script>
-let chartEstado, chartAgente, chartCategoria;
+    // Funciones de preset de fechas
+    function getDateRange(preset) {
+      const today = new Date();
+      const start = new Date(today);
+      const end = new Date(today);
 
-async function loadData() {
-  try {
-    const [kpis, estado, agente, categoria, tickets] = await Promise.all([
-      fetch('/api/kpis').then(r => r.json()),
-      fetch('/api/tickets-por-estado').then(r => r.json()),
-      fetch('/api/tickets-por-agente').then(r => r.json()),
-      fetch('/api/tickets-por-categoria').then(r => r.json()),
-      fetch('/api/tickets').then(r => r.json())
-    ]);
+      switch(preset) {
+        case 'thisWeek':
+          start.setDate(today.getDate() - today.getDay());
+          break;
+        case 'lastWeek':
+          start.setDate(today.getDate() - today.getDay() - 7);
+          end.setDate(today.getDate() - today.getDay() - 1);
+          break;
+        case 'thisMonth':
+          start.setDate(1);
+          break;
+        case 'allTime':
+          return { start: '', end: '' };
+      }
 
-    renderKPIs(kpis);
-    renderChart('estado', estado);
-    renderChart('agente', agente);
-    renderChart('categoria', categoria);
-    renderTickets(tickets);
-    
-    document.getElementById('last-update').textContent = new Date().toLocaleTimeString('es-MX');
-  } catch (error) {
-    console.error('Error loading data:', error);
-    document.getElementById('kpis-container').innerHTML = '<div class="error">Error al cargar datos</div>';
-  }
-}
+      return {
+        start: start.toISOString().split('T')[0],
+        end: end.toISOString().split('T')[0]
+      };
+    }
 
-function renderKPIs(kpis) {
-  const html = `
-    <div class="kpi-card">
-      <div class="kpi-label">Tickets Abiertos</div>
-      <div class="kpi-value">${kpis.tickets_abiertos}</div>
-    </div>
-    <div class="kpi-card closed">
-      <div class="kpi-label">Tickets Cerrados</div>
-      <div class="kpi-value">${kpis.tickets_cerrados}</div>
-    </div>
-    <div class="kpi-card spam">
-      <div class="kpi-label">Spam</div>
-      <div class="kpi-value">${kpis.tickets_spam}</div>
-    </div>
-    <div class="kpi-card">
-      <div class="kpi-label">Total</div>
-      <div class="kpi-value">${kpis.total_tickets}</div>
-    </div>
-    <div class="kpi-card">
-      <div class="kpi-label">Tiempo Promedio</div>
-      <div class="kpi-value">${kpis.tiempo_promedio_horas}h</div>
-    </div>
-  `;
-  document.getElementById('kpis-container').innerHTML = html;
-}
+    function setPreset(preset) {
+      activePreset = preset;
+      document.querySelectorAll('.preset-btn').forEach(btn => btn.classList.remove('active'));
+      event.target.classList.add('active');
 
-function renderChart(type, data) {
-  const ctx = document.getElementById(`chart-${type}`).getContext('2d');
-  const colors = ['#667eea', '#764ba2', '#f093fb', '#4facfe', '#00f2fe', '#43e97b', '#fa709a', '#fee140', '#30cfd0', '#330867'];
-  
-  if (window[`chart${type.charAt(0).toUpperCase() + type.slice(1)}`]) {
-    window[`chart${type.charAt(0).toUpperCase() + type.slice(1)}`].destroy();
-  }
+      const range = getDateRange(preset);
+      document.getElementById('startDate').value = range.start;
+      document.getElementById('endDate').value = range.end;
 
-  window[`chart${type.charAt(0).toUpperCase() + type.slice(1)}`] = new Chart(ctx, {
-    type: 'bar',
-    data: {
-      labels: data.labels,
-      datasets: [{
-        label: 'Cantidad',
-        data: data.data,
-        backgroundColor: colors.slice(0, data.data.length),
-        borderRadius: 8,
-        borderSkipped: false
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
-      scales: {
-        y: { beginAtZero: true, ticks: { stepSize: 1 } }
+      loadData();
+    }
+
+    // Inicializar con esta semana
+    window.addEventListener('load', () => {
+      const range = getDateRange('thisWeek');
+      document.getElementById('startDate').value = range.start;
+      document.getElementById('endDate').value = range.end;
+      loadData();
+    });
+
+    // Función para cargar todos los datos
+    async function loadData() {
+      const startDate = document.getElementById('startDate').value;
+      const endDate = document.getElementById('endDate').value;
+      const params = new URLSearchParams();
+      
+      if (startDate) params.append('startDate', startDate);
+      if (endDate) params.append('endDate', endDate);
+
+      try {
+        hideError();
+        await Promise.all([
+          loadKPIs(params),
+          loadChart('estadoChart', 'tickets-por-estado', params, 'Estado'),
+          loadChart('agenteChart', 'tickets-por-agente', params, 'Agente'),
+          loadChart('categoriaChart', 'tickets-por-categoria', params, 'Categoría'),
+          loadTickets(params)
+        ]);
+      } catch (error) {
+        showError('Error al cargar datos: ' + error.message);
       }
     }
-  });
-}
 
-function renderTickets(tickets) {
-  const statusClass = {
-    'New': 'status-open',
-    'Open': 'status-open',
-    'On Hold': 'status-hold',
-    'Waiting for Customer': 'status-hold',
-    'Closed': 'status-closed',
-    'Spam': 'status-spam'
-  };
+    async function loadKPIs(params) {
+      try {
+        const response = await fetch(`/api/kpis?${params}`);
+        const data = await response.json();
 
-  const priorityClass = {
-    'Urgent': 'priority-high',
-    'High': 'priority-high',
-    'Medium': 'priority-medium',
-    'Low': 'priority-low'
-  };
+        document.getElementById('kpisContainer').innerHTML = `
+          <div class="kpi-card">
+            <div class="kpi-label">Abiertos</div>
+            <div class="kpi-value">${data.tickets_abiertos}</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Cerrados</div>
+            <div class="kpi-value">${data.tickets_cerrados}</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Spam</div>
+            <div class="kpi-value">${data.tickets_spam}</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Total</div>
+            <div class="kpi-value">${data.total_tickets}</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Promedio (horas)</div>
+            <div class="kpi-value">${data.tiempo_promedio_horas}</div>
+          </div>
+        `;
+      } catch (error) {
+        console.error('Error cargando KPIs:', error);
+      }
+    }
 
-  const html = tickets.map(t => `
-    <tr>
-      <td><strong>#${t.id}</strong></td>
-      <td>${t.subject.substring(0, 40)}</td>
-      <td><span class="status-badge ${statusClass[t.status] || 'status-open'}">${t.status}</span></td>
-      <td><span class="${priorityClass[t.priority] || ''}">${t.priority}</span></td>
-      <td>${t.agent}</td>
-      <td>${t.cust_26}</td>
-      <td>${t.created}</td>
-      <td>${t.updated}</td>
-    </tr>
-  `).join('');
+    async function loadChart(canvasId, endpoint, params, label) {
+      try {
+        const response = await fetch(`/api/${endpoint}?${params}`);
+        const data = await response.json();
 
-  document.getElementById('tickets-body').innerHTML = html || '<tr><td colspan="8" style="text-align: center; padding: 20px;">No hay tickets</td></tr>';
-}
+        const ctx = document.getElementById(canvasId).getContext('2d');
+        
+        if (charts[canvasId]) {
+          charts[canvasId].destroy();
+        }
 
-// Cargar datos al inicio
-loadData();
+        charts[canvasId] = new Chart(ctx, {
+          type: 'bar',
+          data: {
+            labels: data.labels,
+            datasets: [{
+              label: label,
+              data: data.data,
+              backgroundColor: [
+                '#667eea', '#764ba2', '#f093fb', '#4facfe', '#00f2fe',
+                '#43e97b', '#fa709a', '#fee140', '#30cfd0', '#330867'
+              ],
+              borderRadius: 6,
+              borderSkipped: false
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { display: false }
+            },
+            scales: {
+              y: {
+                beginAtZero: true,
+                ticks: { stepSize: 1 }
+              }
+            }
+          }
+        });
+      } catch (error) {
+        console.error(`Error cargando chart ${canvasId}:`, error);
+      }
+    }
 
-// Actualizar cada 30 segundos
-setInterval(loadData, 30000);
-</script>
+    async function loadTickets(params) {
+      try {
+        const response = await fetch(`/api/tickets?${params}`);
+        const tickets = await response.json();
 
+        let html = '<table><thead><tr><th>ID</th><th>Asunto</th><th>Estado</th><th>Prioridad</th><th>Agente</th><th>Cliente</th><th>Creado</th><th>Actualizado</th></tr></thead><tbody>';
+
+        tickets.forEach(t => {
+          const statusClass = `status-${t.status.toLowerCase().replace(/\s+/g, '-')}`;
+          const priorityClass = `priority-${t.priority.toLowerCase()}`;
+
+          html += `
+            <tr>
+              <td class="ticket-id">#${t.id}</td>
+              <td>${t.subject}</td>
+              <td><span class="status-badge ${statusClass}">${t.status}</span></td>
+              <td><span class="${priorityClass}">${t.priority}</span></td>
+              <td>${t.agent}</td>
+              <td>${t.cust_26}</td>
+              <td>${t.created}</td>
+              <td>${t.updated}</td>
+            </tr>
+          `;
+        });
+
+        html += '</tbody></table>';
+        document.getElementById('ticketsContainer').innerHTML = html || '<p style="text-align: center; padding: 20px;">No hay tickets</p>';
+      } catch (error) {
+        console.error('Error cargando tickets:', error);
+      }
+    }
+
+    function showError(message) {
+      const alert = document.getElementById('errorAlert');
+      alert.textContent = message;
+      alert.classList.add('show');
+    }
+
+    function hideError() {
+      document.getElementById('errorAlert').classList.remove('show');
+    }
+
+    // Auto-refresh cada 30 segundos
+    setInterval(loadData, 30000);
+  </script>
 </body>
 </html>
