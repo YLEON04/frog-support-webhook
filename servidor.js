@@ -88,7 +88,7 @@ app.post('/webhook/support-candy', async (req, res) => {
   }
 });
 
-/// API: Obtener KPIs principales
+// API: Obtener KPIs principales
 app.get('/api/kpis', async (req, res) => {
   try {
     const result = await pool.query(`
@@ -120,19 +120,16 @@ app.get('/api/kpis', async (req, res) => {
 app.get('/api/tickets-por-estado', async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT status, COUNT(*) as cantidad
-      FROM support_candy_tickets
-      GROUP BY status
-      ORDER BY status ASC
+      SELECT s.status_id, s.status_name_es, COUNT(t.ticket_id) as cantidad
+      FROM sc_statuses s
+      LEFT JOIN support_candy_tickets t ON t.status = s.status_id
+      GROUP BY s.status_id, s.status_name_es
+      ORDER BY s.status_id ASC
     `);
 
-    const statusMap = {
-      '1': 'New', '2': 'Open', '3': 'On Hold', '4': 'Waiting for Customer', '5': 'Closed', '6': 'Spam'
-    };
-
     res.json({
-      labels: result.rows.map(r => statusMap[r.status] || `Status ${r.status}`),
-      data: result.rows.map(r => parseInt(r.cantidad))
+      labels: result.rows.map(r => r.status_name_es),
+      data: result.rows.map(r => parseInt(r.cantidad || 0))
     });
 
   } catch (error) {
@@ -144,17 +141,16 @@ app.get('/api/tickets-por-estado', async (req, res) => {
 app.get('/api/tickets-por-agente', async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT assigned_agent, COUNT(*) as cantidad
-      FROM support_candy_tickets
-      WHERE assigned_agent IS NOT NULL
-      GROUP BY assigned_agent
+      SELECT a.agent_id, a.agent_name, COUNT(t.ticket_id) as cantidad
+      FROM sc_agents a
+      LEFT JOIN support_candy_tickets t ON (t.assigned_agent::text LIKE '%' || a.agent_id::text || '%' OR CAST(t.assigned_agent AS INTEGER) = a.agent_id)
+      GROUP BY a.agent_id, a.agent_name
       ORDER BY cantidad DESC
-      LIMIT 10
     `);
 
     res.json({
-      labels: result.rows.map((r, i) => r.assigned_agent || `Agent ${i + 1}`),
-      data: result.rows.map(r => parseInt(r.cantidad))
+      labels: result.rows.map(r => r.agent_name),
+      data: result.rows.map(r => parseInt(r.cantidad || 0))
     });
 
   } catch (error) {
@@ -166,17 +162,16 @@ app.get('/api/tickets-por-agente', async (req, res) => {
 app.get('/api/tickets-por-categoria', async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT category, COUNT(*) as cantidad
-      FROM support_candy_tickets
-      WHERE category IS NOT NULL
-      GROUP BY category
+      SELECT c.category_id, c.category_name, COUNT(t.ticket_id) as cantidad
+      FROM sc_categories c
+      LEFT JOIN support_candy_tickets t ON t.category = c.category_id
+      GROUP BY c.category_id, c.category_name
       ORDER BY cantidad DESC
-      LIMIT 10
     `);
 
     res.json({
-      labels: result.rows.map(r => `Cat ${r.category}`),
-      data: result.rows.map(r => parseInt(r.cantidad))
+      labels: result.rows.map(r => r.category_name),
+      data: result.rows.map(r => parseInt(r.cantidad || 0))
     });
 
   } catch (error) {
@@ -189,16 +184,18 @@ app.get('/api/tickets', async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT 
-        ticket_id, subject, status, priority, assigned_agent, category, customer,
-        date_created, date_updated, date_closed, cust_26
-      FROM support_candy_tickets
-      ORDER BY date_updated DESC
+        t.ticket_id, t.subject, t.status, t.priority, t.assigned_agent, t.category, t.customer,
+        t.date_created, t.date_updated, t.date_closed, t.cust_26,
+        s.status_name_es,
+        c.category_name,
+        a.agent_name
+      FROM support_candy_tickets t
+      LEFT JOIN sc_statuses s ON t.status = s.status_id
+      LEFT JOIN sc_categories c ON t.category = c.category_id
+      LEFT JOIN sc_agents a ON (t.assigned_agent::text LIKE '%' || a.agent_id::text || '%' OR CAST(t.assigned_agent AS INTEGER) = a.agent_id)
+      ORDER BY t.date_updated DESC
       LIMIT 100
     `);
-
-    const statusMap = {
-      '1': 'New', '2': 'Open', '3': 'On Hold', '4': 'Waiting for Customer', '5': 'Closed', '6': 'Spam'
-    };
 
     const priorityMap = {
       '1': 'Low', '2': 'Medium', '3': 'High', '4': 'Urgent'
@@ -207,10 +204,10 @@ app.get('/api/tickets', async (req, res) => {
     res.json(result.rows.map(t => ({
       id: t.ticket_id,
       subject: t.subject,
-      status: statusMap[t.status] || `Status ${t.status}`,
+      status: t.status_name_es || `Status ${t.status}`,
       priority: priorityMap[t.priority] || `Priority ${t.priority}`,
-      agent: t.assigned_agent || 'Sin asignar',
-      category: t.category || '-',
+      agent: t.agent_name || 'Sin asignar',
+      category: t.category_name || '-',
       customer: t.customer || '-',
       cust_26: t.cust_26 || '-',
       created: t.date_created ? new Date(t.date_created).toLocaleDateString('es-MX') : '-',
