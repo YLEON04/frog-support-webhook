@@ -707,9 +707,13 @@ function filterTicketsByInstance(instance) {
   const rows = table.querySelectorAll('tr');
   let visibleCount = 0;
 
+  const normalizedFilter = instance.toLowerCase().trim();
+
   rows.forEach(row => {
     const instanceCell = row.cells[6]; // Columna INSTANCIA
-    if (instanceCell.textContent.trim() === instance) {
+    const cellText = instanceCell.textContent.trim().toLowerCase();
+    
+    if (cellText === normalizedFilter) {
       row.style.display = '';
       visibleCount++;
     } else {
@@ -717,7 +721,6 @@ function filterTicketsByInstance(instance) {
     }
   });
 
-  // Agregar badge de filtro
   updateFilterBadge(`Instancia: ${instance}`, visibleCount);
 }
 
