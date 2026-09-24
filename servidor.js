@@ -178,7 +178,11 @@ app.get('/api/tickets-por-agente', async (req, res) => {
     const result = await pool.query(`
       SELECT a.agent_id, a.agent_name, COUNT(DISTINCT t.ticket_id) as cantidad
       FROM sc_agents a
-      LEFT JOIN support_candy_tickets t ON t.assigned_agent::text LIKE '%' || a.agent_id::text || '%'
+      LEFT JOIN support_candy_tickets t ON (
+        t.assigned_agent::text = a.agent_id::text OR
+        t.assigned_agent::text LIKE a.agent_id::text || '|%' OR
+        t.assigned_agent::text LIKE '%|' || a.agent_id::text
+      )
       WHERE a.agent_id IN (22, 23, 17, 5, 3) ${dateFilter}
       GROUP BY a.agent_id, a.agent_name
       ORDER BY cantidad DESC
@@ -244,8 +248,7 @@ app.get('/api/tickets-por-instancia', async (req, res) => {
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
-});
-// API: Obtener todos los tickets con detalles (SIN DUPLICADOS)
+});// API: Obtener todos los tickets con detalles (SIN DUPLICADOS)
 app.get('/api/tickets', async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
@@ -254,7 +257,7 @@ app.get('/api/tickets', async (req, res) => {
     const result = await pool.query(`
       SELECT DISTINCT ON (t.ticket_id)
         t.ticket_id, t.subject, t.status, t.priority, t.assigned_agent, t.category, t.customer,
-        t.date_created, t.date_updated, t.date_closed, t.cust_26,
+        t.date_created, t.date_updated, t.date_closed, t.cust_26, t.last_reply_by,
         s.status_name_es,
         c.category_name
       FROM support_candy_tickets t
@@ -272,17 +275,28 @@ app.get('/api/tickets', async (req, res) => {
     // Obtener nombre del agente por separado
     const ticketsWithAgents = await Promise.all(result.rows.map(async (t) => {
       let agentName = 'Sin asignar';
+      let agentId = null;
+
+      // Intentar obtener del assigned_agent primero
       if (t.assigned_agent) {
         const agentIds = t.assigned_agent.toString().split('|');
-        const firstAgentId = agentIds[0];
+        agentId = parseInt(agentIds[0]);
+      }
+      // Si no hay assigned_agent, intentar con last_reply_by
+      else if (t.last_reply_by) {
+        agentId = parseInt(t.last_reply_by);
+      }
+
+      if (agentId) {
         const agentResult = await pool.query(
           'SELECT agent_name FROM sc_agents WHERE agent_id = $1',
-          [parseInt(firstAgentId)]
+          [agentId]
         );
         if (agentResult.rows.length > 0) {
           agentName = agentResult.rows[0].agent_name;
         }
       }
+
       return {
         id: t.ticket_id,
         subject: t.subject,
@@ -304,6 +318,7 @@ app.get('/api/tickets', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
 // API: Obtener histórico de un ticket
 app.get('/api/ticket-timeline/:ticketId', async (req, res) => {
   try {
