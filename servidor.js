@@ -17,7 +17,7 @@ const pool = new Pool({
 
 // Helper para convertir fechas inválidas a null
 const fixDate = (dateStr) => {
-  if (!dateStr || dateStr === '0000-00-00 00:00:00' || dateStr === '0000-00-00') {
+  if (!dateStr || dateStr.includes('0000-00-00')) {
     return null;
   }
   return dateStr;
@@ -29,7 +29,6 @@ app.post('/webhook/support-candy', async (req, res) => {
     const data = req.body;
     console.log('✅ Webhook recibido');
     
-    // El webhook puede llegar directamente o dentro de payload
     const ticket = data.ticket || (data.payload && data.payload.ticket);
     const changeData = data.data || (data.payload && data.payload.data) || {};
 
@@ -63,58 +62,20 @@ app.post('/webhook/support-candy', async (req, res) => {
     `;
 
     const values = [
-      ticket.id,
-      ticket.is_active || 0,
-      ticket.customer || null,
-      ticket.subject || '',
-      ticket.status || null,
-      ticket.priority || null,
-      ticket.category || null,
-      ticket.assigned_agent || null,
-      fixDate(ticket.date_created),
-      fixDate(ticket.date_updated),
-      ticket.agent_created || null,
-      ticket.ip_address || '',
-      ticket.source || '',
-      ticket.browser || '',
-      ticket.os || '',
-      ticket.prev_assignee || '',
-      fixDate(ticket.date_closed),
-      ticket.user_type || '',
-      fixDate(ticket.last_reply_on),
-      ticket.last_reply_by || null,
-      ticket.last_reply_source || '',
-      ticket.auth_code || '',
-      ticket.tags || '',
-      ticket.live_agents || '',
-      ticket.misc || '',
-      ticket.frd || null,
-      ticket.ard || null,
-      ticket.cd || null,
-      ticket.cg || null,
-      ticket.cust_26 || '',
-      ticket.cust_28 || '',
-      ticket.cust_29 || '',
-      ticket.cust_30 || '',
-      ticket.cust_31 || '',
-      ticket.cust_32 || '',
-      ticket.cust_33 || '',
-      fixDate(ticket.cust_34),
-      ticket.pin || 0,
-      ticket.rating || 0,
-      ticket.sf_feedback || '',
-      fixDate(ticket.sf_date),
-      fixDate(ticket.sla),
-      ticket.od_count || 0,
-      ticket.od_email || 0,
-      ticket.sla_policy || 0,
-      ticket.time_spent || '',
-      ticket.cust_40 || null,
-      ticket.cust_41 || null,
-      ticket.cust_42 || '',
-      changeData.previous || null,
-      changeData.new || null,
-      JSON.stringify(data)
+      ticket.id, ticket.is_active || 0, ticket.customer || null, ticket.subject || '',
+      ticket.status || null, ticket.priority || null, ticket.category || null, ticket.assigned_agent || null,
+      fixDate(ticket.date_created), fixDate(ticket.date_updated), ticket.agent_created || null,
+      ticket.ip_address || '', ticket.source || '', ticket.browser || '', ticket.os || '',
+      ticket.prev_assignee || '', fixDate(ticket.date_closed), ticket.user_type || '',
+      fixDate(ticket.last_reply_on), ticket.last_reply_by || null, ticket.last_reply_source || '',
+      ticket.auth_code || '', ticket.tags || '', ticket.live_agents || '', ticket.misc || '',
+      ticket.frd || null, ticket.ard || null, ticket.cd || null, ticket.cg || null,
+      ticket.cust_26 || '', ticket.cust_28 || '', ticket.cust_29 || '', ticket.cust_30 || '',
+      ticket.cust_31 || '', ticket.cust_32 || '', ticket.cust_33 || '', fixDate(ticket.cust_34),
+      ticket.pin || 0, ticket.rating || 0, ticket.sf_feedback || '', fixDate(ticket.sf_date),
+      fixDate(ticket.sla), ticket.od_count || 0, ticket.od_email || 0, ticket.sla_policy || 0,
+      ticket.time_spent || '', ticket.cust_40 || null, ticket.cust_41 || null, ticket.cust_42 || '',
+      changeData.previous || null, changeData.new || null, JSON.stringify(data)
     ];
 
     await pool.query(query, values);
@@ -127,39 +88,138 @@ app.post('/webhook/support-candy', async (req, res) => {
   }
 });
 
-// API: Obtener estadísticas
-app.get('/api/stats', async (req, res) => {
+// API: Obtener KPIs principales
+app.get('/api/kpis', async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT 
-        status,
-        COUNT(*) as cantidad
+      SELECT
+        COUNT(*) FILTER (WHERE status IN (1,2,3,4)) as tickets_abiertos,
+        COUNT(*) FILTER (WHERE status = 5) as tickets_cerrados,
+        COUNT(*) FILTER (WHERE status = 6) as tickets_spam,
+        COUNT(*) as total_tickets,
+        ROUND(AVG(EXTRACT(EPOCH FROM (date_closed - date_created)) / 3600)::numeric, 1) as tiempo_promedio_horas
       FROM support_candy_tickets
-      GROUP BY status
-      ORDER BY cantidad DESC
+      WHERE date_closed IS NOT NULL
     `);
 
-    const statusMap = {
-      '1': 'New',
-      '2': 'Open',
-      '3': 'On Hold',
-      '4': 'Waiting for Customer',
-      '5': 'Closed',
-      '6': 'Spam'
-    };
-
+    const row = result.rows[0];
     res.json({
-      statusLabels: result.rows.map(r => statusMap[r.status] || `Status ${r.status}`),
-      statusCounts: result.rows.map(r => parseInt(r.cantidad))
+      tickets_abiertos: parseInt(row.tickets_abiertos || 0),
+      tickets_cerrados: parseInt(row.tickets_cerrados || 0),
+      tickets_spam: parseInt(row.tickets_spam || 0),
+      total_tickets: parseInt(row.total_tickets || 0),
+      tiempo_promedio_horas: parseFloat(row.tiempo_promedio_horas || 0)
     });
 
   } catch (error) {
-    console.error('❌ Error en API:', error.message);
-    res.status(500).json({ 
-      error: error.message,
-      statusLabels: [],
-      statusCounts: []
+    console.error('❌ Error en KPIs:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Obtener tickets por estado
+app.get('/api/tickets-por-estado', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT status, COUNT(*) as cantidad
+      FROM support_candy_tickets
+      GROUP BY status
+      ORDER BY status ASC
+    `);
+
+    const statusMap = {
+      '1': 'New', '2': 'Open', '3': 'On Hold', '4': 'Waiting for Customer', '5': 'Closed', '6': 'Spam'
+    };
+
+    res.json({
+      labels: result.rows.map(r => statusMap[r.status] || `Status ${r.status}`),
+      data: result.rows.map(r => parseInt(r.cantidad))
     });
+
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Obtener tickets por agente
+app.get('/api/tickets-por-agente', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT assigned_agent, COUNT(*) as cantidad
+      FROM support_candy_tickets
+      WHERE assigned_agent IS NOT NULL
+      GROUP BY assigned_agent
+      ORDER BY cantidad DESC
+      LIMIT 10
+    `);
+
+    res.json({
+      labels: result.rows.map((r, i) => r.assigned_agent || `Agent ${i + 1}`),
+      data: result.rows.map(r => parseInt(r.cantidad))
+    });
+
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Obtener tickets por categoría
+app.get('/api/tickets-por-categoria', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT category, COUNT(*) as cantidad
+      FROM support_candy_tickets
+      WHERE category IS NOT NULL
+      GROUP BY category
+      ORDER BY cantidad DESC
+      LIMIT 10
+    `);
+
+    res.json({
+      labels: result.rows.map(r => `Cat ${r.category}`),
+      data: result.rows.map(r => parseInt(r.cantidad))
+    });
+
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Obtener todos los tickets con detalles
+app.get('/api/tickets', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        ticket_id, subject, status, priority, assigned_agent, category, customer,
+        date_created, date_updated, date_closed, cust_26
+      FROM support_candy_tickets
+      ORDER BY date_updated DESC
+      LIMIT 100
+    `);
+
+    const statusMap = {
+      '1': 'New', '2': 'Open', '3': 'On Hold', '4': 'Waiting for Customer', '5': 'Closed', '6': 'Spam'
+    };
+
+    const priorityMap = {
+      '1': 'Low', '2': 'Medium', '3': 'High', '4': 'Urgent'
+    };
+
+    res.json(result.rows.map(t => ({
+      id: t.ticket_id,
+      subject: t.subject,
+      status: statusMap[t.status] || `Status ${t.status}`,
+      priority: priorityMap[t.priority] || `Priority ${t.priority}`,
+      agent: t.assigned_agent || 'Sin asignar',
+      category: t.category || '-',
+      customer: t.customer || '-',
+      cust_26: t.cust_26 || '-',
+      created: t.date_created ? new Date(t.date_created).toLocaleDateString('es-MX') : '-',
+      updated: t.date_updated ? new Date(t.date_updated).toLocaleDateString('es-MX') : '-'
+    })));
+
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
 });
 
