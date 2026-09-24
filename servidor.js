@@ -88,7 +88,7 @@ app.post('/webhook/support-candy', async (req, res) => {
   }
 });
 
-// API: Obtener KPIs principales
+/// API: Obtener KPIs principales
 app.get('/api/kpis', async (req, res) => {
   try {
     const result = await pool.query(`
@@ -97,9 +97,8 @@ app.get('/api/kpis', async (req, res) => {
         COUNT(*) FILTER (WHERE status = 5) as tickets_cerrados,
         COUNT(*) FILTER (WHERE status = 6) as tickets_spam,
         COUNT(*) as total_tickets,
-        ROUND(AVG(EXTRACT(EPOCH FROM (date_closed - date_created)) / 3600)::numeric, 1) as tiempo_promedio_horas
+        ROUND(AVG(EXTRACT(EPOCH FROM (COALESCE(date_closed, date_updated) - date_created)) / 3600)::numeric, 1) as tiempo_promedio_horas
       FROM support_candy_tickets
-      WHERE date_closed IS NOT NULL
     `);
 
     const row = result.rows[0];
