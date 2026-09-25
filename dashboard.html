@@ -759,6 +759,34 @@
       margin-bottom: 20px;
     }
 
+    /* Carga de trabajo */
+    .workload-suggestion {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      background: #e8f5e9;
+      border-left: 5px solid #43a047;
+      padding: 14px 18px;
+      border-radius: 8px;
+      margin-bottom: 15px;
+      font-size: 15px;
+      color: #2e7d32;
+    }
+
+    .workload-suggestion .alt {
+      font-size: 13px;
+      color: #555;
+    }
+
+    .load-bar {
+      display: inline-block;
+      height: 10px;
+      border-radius: 5px;
+      vertical-align: middle;
+      margin-right: 6px;
+    }
+
     #ticketsContainer {
       overflow-x: auto;
     }
@@ -893,6 +921,7 @@
 
     <div class="tabs-bar">
       <button class="tab-btn active" data-tab="tab-rezago" onclick="showTab('tab-rezago')">⏰ Rezago</button>
+      <button class="tab-btn" data-tab="tab-carga" onclick="showTab('tab-carga')">⚖️ Carga de trabajo</button>
       <button class="tab-btn" data-tab="tab-rendimiento" onclick="showTab('tab-rendimiento')">🏆 Rendimiento</button>
       <button class="tab-btn" data-tab="tab-tendencias" onclick="showTab('tab-tendencias')">📊 Tendencias</button>
       <button class="tab-btn" data-tab="tab-distribuciones" onclick="showTab('tab-distribuciones')">📈 Distribuciones</button>
@@ -909,6 +938,19 @@
       </div>
     </div>
 
+    </div>
+
+    <div class="tab-panel" id="tab-carga">
+      <div class="workload-section">
+        <h2 class="section-title">⚖️ ¿A quién le asigno? (carga actual por agente)</h2>
+        <div id="cargaSugerencia" class="workload-suggestion"></div>
+        <div class="aging-chart-container">
+          <div style="position: relative; height: 300px;">
+            <canvas id="cargaChart"></canvas>
+          </div>
+        </div>
+        <div id="cargaTable" class="performance-table"></div>
+      </div>
     </div>
 
     <div class="tab-panel" id="tab-rendimiento">
@@ -1077,6 +1119,7 @@
           loadChart('instanciaChart', 'tickets-por-instancia', params, 'Instancia'),
           loadChart('impactoChart', 'tickets-por-impacto', params, 'Impacto'),
           loadAgingChart(),
+          loadCarga(),
           loadPerformance(params),
           loadTendencia(params),
           loadHorasPorEstado(params),
@@ -1564,6 +1607,91 @@
         });
       } catch (error) {
         console.error('Error cargando impacto por instancia:', error);
+      }
+    }
+
+    async function loadCarga() {
+      try {
+        const response = await fetch('/api/carga-agentes');
+        const data = await response.json();
+        const agentes = data.agentes || [];
+
+        // Sugerencia: el de menor carga, y los siguientes como alternativa
+        if (agentes.some(a => a.asignable)) {
+          const [primero, segundo, tercero] = agentes.filter(a => a.asignable);
+          const alternativas = [segundo, tercero].filter(Boolean)
+            .map(a => `${a.agent} (${a.puntos} pts)`).join(' · ');
+          document.getElementById('cargaSugerencia').innerHTML = `
+            <span>✅ <strong>Sugerido: ${primero.agent}</strong> — ${primero.puntos} pts de carga, ${primero.cau} en CAU</span>
+            ${alternativas ? `<span class="alt">Siguientes: ${alternativas}</span>` : ''}
+          `;
+        }
+
+        if (charts['cargaChart']) charts['cargaChart'].destroy();
+
+        const ctx = document.getElementById('cargaChart').getContext('2d');
+        charts['cargaChart'] = new Chart(ctx, {
+          type: 'bar',
+          data: {
+            labels: agentes.map(a => a.agent),
+            datasets: [
+              { label: 'En CAU (requiere acción)', data: agentes.map(a => a.cau), backgroundColor: '#e53935', borderRadius: 4 },
+              { label: 'En otras áreas', data: agentes.map(a => a.otras), backgroundColor: '#764ba2', borderRadius: 4 },
+              { label: 'Con cliente', data: agentes.map(a => a.cliente), backgroundColor: '#43a047', borderRadius: 4 }
+            ]
+          },
+          options: {
+            indexAxis: 'y',
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { position: 'top' },
+              tooltip: {
+                callbacks: {
+                  afterBody: (items) => {
+                    const a = agentes[items[0].dataIndex];
+                    return ['', `⚖️ Carga: ${a.puntos} pts`, `🚨 Stoppers: ${a.stoppers}`, `⏰ Con rezago: ${a.rezagados}`];
+                  }
+                }
+              }
+            },
+            scales: {
+              x: { stacked: true, beginAtZero: true, ticks: { stepSize: 1 }, title: { display: true, text: 'Tickets abiertos' } },
+              y: { stacked: true }
+            },
+            onClick: (event, elements) => {
+              if (elements.length > 0) {
+                filterTicketsByAgent(agentes[elements[0].index].agent);
+              }
+            }
+          }
+        });
+
+        // Tabla con el detalle de puntos
+        const maxPuntos = Math.max(1, ...agentes.map(a => a.puntos));
+        const colorCarga = (p) => p / maxPuntos <= 0.4 ? '#43a047' : (p / maxPuntos <= 0.75 ? '#f0ad4e' : '#e53935');
+        const p = data.pesos;
+
+        let html = '<table><thead><tr><th>Agente</th><th>Carga</th><th>En CAU</th><th>Otras áreas</th><th>Con cliente</th><th>Stoppers</th><th>Con rezago</th></tr></thead><tbody>';
+        agentes.forEach((a, i) => {
+          const ancho = Math.max(6, Math.round((a.puntos / maxPuntos) * 100));
+          html += `
+            <tr>
+              <td><strong>${a.agent === data.sugerido ? '✅ ' : ''}${a.agent}</strong>${a.asignable ? '' : ' <span style="color:#999;font-size:11px;">(no se sugiere)</span>'}</td>
+              <td style="text-align:left;"><span class="load-bar" style="width:${ancho}px;background:${colorCarga(a.puntos)};"></span>${a.puntos} pts</td>
+              <td>${a.cau}</td>
+              <td>${a.otras}</td>
+              <td>${a.cliente}</td>
+              <td class="${a.stoppers > 0 ? 'perf-bad' : ''}">${a.stoppers}</td>
+              <td class="${a.rezagados > 0 ? 'perf-bad' : ''}">${a.rezagados}</td>
+            </tr>`;
+        });
+        html += '</tbody></table>';
+        html += `<p class="perf-note">Carga = ticket en CAU ${p.cau} pt · en otras áreas ${p.otras} pt · con cliente ${p.cliente} pt · +${p.stopper} si es Stopper · +${p.rezago} si tiene rezago. Es la foto de hoy (no depende del filtro de fechas). Clic en una barra para ver sus tickets en la tabla.</p>`;
+        document.getElementById('cargaTable').innerHTML = html;
+
+      } catch (error) {
+        console.error('Error cargando carga de trabajo:', error);
       }
     }
 

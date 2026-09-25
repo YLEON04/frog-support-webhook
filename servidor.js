@@ -782,6 +782,91 @@ app.get('/api/impacto-por-instancia', async (req, res) => {
   }
 });
 
+// API: Carga de trabajo actual por agente (para decidir a quién asignar)
+// No usa el filtro de fechas: es la foto de hoy
+// Peso de cada ticket abierto:
+//   En CAU / Sin asignar → 1.0 (el agente tiene que actuar)
+//   Otras áreas (validación, programación, etc.) → 0.5 (seguimiento)
+//   Con cliente → 0.25 (esperando respuesta)
+//   Extra: +1.0 si es Stopper, +0.5 si tiene rezago
+const PESOS_CARGA = { cau: 1, espera: 1, otras: 0.5, cliente: 0.25, stopper: 1, rezago: 0.5 };
+// Agentes que se muestran pero no se sugieren para asignar (la líder que asigna)
+const NO_SUGERIR = ['3']; // Yazmin León
+
+app.get('/api/carga-agentes', async (req, res) => {
+  try {
+    const agentsResult = await pool.query(
+      'SELECT agent_id, agent_name FROM sc_agents WHERE agent_id IN (22, 23, 17, 5, 3)'
+    );
+
+    const carga = {};
+    agentsResult.rows.forEach(a => {
+      carga[a.agent_id.toString()] = {
+        agent: a.agent_name,
+        asignable: !NO_SUGERIR.includes(a.agent_id.toString()),
+        cau: 0, otras: 0, cliente: 0,
+        stoppers: 0, rezagados: 0,
+        abiertos: 0, puntos: 0
+      };
+    });
+
+    const stopperResult = await pool.query(`SELECT id, name FROM sc_impacts`);
+    const stopperIds = stopperResult.rows
+      .filter(r => normalizeTxt(r.name) === 'stopper')
+      .map(r => r.id.toString());
+
+    const result = await pool.query(`
+      SELECT DISTINCT ON (t.ticket_id)
+        t.ticket_id, t.assigned_agent, t.cust_41, s.status_name_es
+      FROM support_candy_tickets t
+      LEFT JOIN sc_statuses s ON t.status = s.status_id
+      WHERE t.status IS NOT NULL
+        AND t.status NOT IN (5, 6)
+        AND ${CAU_AGENT_FILTER}
+      ORDER BY t.ticket_id, t.date_updated DESC
+    `);
+
+    // Tickets con rezago (misma lógica que la pestaña de Rezago)
+    const rezagados = await calcularRezagados();
+    const rezagoIds = new Set(rezagados.map(t => t.id.toString()));
+
+    result.rows.forEach(t => {
+      const grupo = grupoEstado(t.status_name_es);
+      const grupoCarga = grupo === 'espera' ? 'cau' : grupo;
+      if (!['cau', 'otras', 'cliente'].includes(grupoCarga)) return;
+
+      const impactos = (t.cust_41 || '').toString().split(/[^0-9]+/).filter(v => v !== '');
+      const esStopper = impactos.some(id => stopperIds.includes(id));
+      const conRezago = rezagoIds.has(t.ticket_id.toString());
+
+      const ids = t.assigned_agent.toString().split('|').map(v => v.trim());
+      ids.filter(id => carga[id]).forEach(id => {
+        const c = carga[id];
+        c[grupoCarga]++;
+        c.abiertos++;
+        c.puntos += PESOS_CARGA[grupoCarga];
+        if (esStopper) { c.stoppers++; c.puntos += PESOS_CARGA.stopper; }
+        if (conRezago) { c.rezagados++; c.puntos += PESOS_CARGA.rezago; }
+      });
+    });
+
+    const agentes = Object.values(carga)
+      .map(c => ({ ...c, puntos: Math.round(c.puntos * 100) / 100 }))
+      .sort((a, b) => (b.asignable - a.asignable) || (a.puntos - b.puntos) || (a.cau - b.cau));
+
+    const primero = agentes.find(a => a.asignable);
+    res.json({
+      sugerido: primero ? primero.agent : null,
+      pesos: PESOS_CARGA,
+      agentes
+    });
+
+  } catch (error) {
+    console.error('Error en /api/carga-agentes:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // API: Obtener todos los tickets con detalles (SIN DUPLICADOS)
 app.get('/api/tickets', async (req, res) => {
   try {
@@ -1028,6 +1113,135 @@ app.get('/api/ticket-timeline/:ticketId', async (req, res) => {
 
   } catch (error) {
     console.error('Error en /api/ticket-timeline:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ===== ALERTA POR CORREO: tickets con rezago =====
+// Lo llama un cron (GitHub Actions) todos los días hábiles.
+// Variables de entorno en Render:
+//   ALERT_TOKEN  → clave para que solo el cron pueda disparar la alerta
+//   ALERT_TO     → destinatarios, separados por coma
+//   ALERT_FROM   → remitente (ej. "Dashboard CAU <cau@frog.com.mx>")
+//   SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS → cuenta de correo que envía
+//   DASHBOARD_URL (opcional) → link al dashboard en el correo
+const nodemailer = require('nodemailer');
+
+const SC_TICKET_URL = 'https://www.frog.com.mx/wp-admin/admin.php?page=wpsc-tickets&section=ticket-list&id=';
+const escapeHtml = (txt) => (txt || '').toString()
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+function construirCorreoRezago(tickets) {
+  const criticos = tickets.filter(t => t.nivel === 'critico');
+  const alertas = tickets.filter(t => t.nivel === 'alerta');
+  const fecha = new Date().toLocaleDateString('es-MX', {
+    timeZone: 'America/Mexico_City', weekday: 'long', day: 'numeric', month: 'long'
+  });
+  const dashboardUrl = process.env.DASHBOARD_URL || 'https://frog-support-webhook.onrender.com/';
+
+  const filas = tickets.map(t => {
+    const color = t.nivel === 'critico' ? '#e53935' : '#f0ad4e';
+    const aviso = t.sinHistorico ? ' <span style="color:#999;">(sin histórico)</span>' : '';
+    return `
+      <tr>
+        <td style="padding:8px;border-bottom:1px solid #eee;">
+          <a href="${SC_TICKET_URL}${t.id}" style="color:#667eea;font-weight:bold;text-decoration:none;">#${t.id}</a>
+        </td>
+        <td style="padding:8px;border-bottom:1px solid #eee;">${escapeHtml(t.subject)}</td>
+        <td style="padding:8px;border-bottom:1px solid #eee;text-align:center;">
+          <span style="background:${color};color:white;padding:3px 8px;border-radius:10px;font-weight:bold;">${t.dias} d</span>${aviso}
+        </td>
+        <td style="padding:8px;border-bottom:1px solid #eee;">${escapeHtml(t.status)}</td>
+        <td style="padding:8px;border-bottom:1px solid #eee;">${escapeHtml(t.agent)}</td>
+        <td style="padding:8px;border-bottom:1px solid #eee;">${escapeHtml(t.instance)}</td>
+      </tr>`;
+  }).join('');
+
+  const subject = `⏰ Rezago CAU: ${tickets.length} ticket${tickets.length === 1 ? '' : 's'}` +
+    (criticos.length ? ` (${criticos.length} con más de 7 días)` : '');
+
+  const html = `
+  <div style="font-family:Segoe UI,Arial,sans-serif;max-width:900px;color:#333;">
+    <div style="background:linear-gradient(135deg,#667eea,#764ba2);color:white;padding:20px;border-radius:10px 10px 0 0;">
+      <h2 style="margin:0;">⏰ Tickets con rezago</h2>
+      <p style="margin:5px 0 0;opacity:0.9;">Reporte del ${fecha}</p>
+    </div>
+    <div style="padding:20px;border:1px solid #eee;border-top:none;border-radius:0 0 10px 10px;">
+      <p>Hay <strong>${tickets.length}</strong> ticket${tickets.length === 1 ? '' : 's'} abiertos con más de 3 días de atención
+      (sin contar el tiempo en que esperamos al cliente):</p>
+      <p>
+        <span style="background:#e53935;color:white;padding:6px 12px;border-radius:6px;font-weight:bold;">🔴 Más de 7 días: ${criticos.length}</span>
+        &nbsp;
+        <span style="background:#f0ad4e;color:white;padding:6px 12px;border-radius:6px;font-weight:bold;">🟠 3 a 7 días: ${alertas.length}</span>
+      </p>
+      <table style="width:100%;border-collapse:collapse;font-size:13px;margin-top:15px;">
+        <thead>
+          <tr style="background:#667eea;color:white;text-align:left;">
+            <th style="padding:8px;">Ticket</th>
+            <th style="padding:8px;">Asunto</th>
+            <th style="padding:8px;text-align:center;">Días</th>
+            <th style="padding:8px;">Estado</th>
+            <th style="padding:8px;">Agente</th>
+            <th style="padding:8px;">Instancia</th>
+          </tr>
+        </thead>
+        <tbody>${filas}</tbody>
+      </table>
+      <p style="margin-top:20px;">
+        <a href="${dashboardUrl}" style="background:#667eea;color:white;padding:10px 18px;border-radius:6px;text-decoration:none;font-weight:bold;">Ver dashboard</a>
+      </p>
+      <p style="font-size:11px;color:#999;margin-top:20px;">Correo automático del Dashboard CAU · Frog ADN</p>
+    </div>
+  </div>`;
+
+  const text = `Tickets con rezago (${fecha}): ${tickets.length}\n` +
+    tickets.map(t => `#${t.id} · ${t.dias} días · ${t.status} · ${t.agent} · ${t.instance} · ${t.subject}`).join('\n') +
+    `\n\nDashboard: ${dashboardUrl}`;
+
+  return { subject, html, text };
+}
+
+// ?dry=1 → solo muestra la vista previa del correo, sin enviarlo
+app.all('/api/alertas/rezago', async (req, res) => {
+  try {
+    const token = req.query.token || req.get('x-alert-token');
+    if (!process.env.ALERT_TOKEN || token !== process.env.ALERT_TOKEN) {
+      return res.status(401).json({ error: 'No autorizado' });
+    }
+
+    const tickets = await calcularRezagados();
+
+    if (tickets.length === 0) {
+      console.log('✅ Alerta de rezago: sin tickets, no se envía correo');
+      return res.json({ sent: false, message: 'No hay tickets con rezago' });
+    }
+
+    const correo = construirCorreoRezago(tickets);
+
+    if (req.query.dry === '1') {
+      return res.send(correo.html);
+    }
+
+    const transporter = nodemailer.createTransport({
+      host: process.env.SMTP_HOST,
+      port: parseInt(process.env.SMTP_PORT || '587'),
+      secure: process.env.SMTP_PORT === '465',
+      auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
+    });
+
+    await transporter.sendMail({
+      from: process.env.ALERT_FROM || process.env.SMTP_USER,
+      to: process.env.ALERT_TO,
+      subject: correo.subject,
+      html: correo.html,
+      text: correo.text
+    });
+
+    console.log(`📧 Alerta de rezago enviada: ${tickets.length} tickets`);
+    res.json({ sent: true, tickets: tickets.length });
+
+  } catch (error) {
+    console.error('❌ Error en alerta de rezago:', error.message);
     res.status(500).json({ error: error.message });
   }
 });
