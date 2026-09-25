@@ -40,7 +40,15 @@ app.post('/webhook/support-candy', async (req, res) => {
     console.log('✅ Webhook recibido');
     
     const ticket = data.ticket || (data.payload && data.payload.ticket);
-    const changeData = data.data || (data.payload && data.payload.data) || {};
+    const rawChange = data.data || (data.payload && data.payload.data) || {};
+
+    // Tipo de evento según la URL del webhook (?evento=...).
+    // Sin parámetro se asume cambio de estado (compatibilidad con el webhook actual).
+    // Solo los cambios de estado alimentan previous/new status y el histórico.
+    const evento = (req.query.evento || 'estado').toString().toLowerCase();
+    const esCambioEstado = evento === 'estado';
+    const changeData = esCambioEstado ? rawChange : {};
+    console.log(`📌 Evento: ${evento}`);
 
     if (!ticket) {
       console.log('⚠️ Estructura inválida - no hay ticket');
@@ -69,8 +77,8 @@ app.post('/webhook/support-candy', async (req, res) => {
         date_updated = $10,
         last_reply_on = $19,
         last_reply_by = $20,
-        previous_status = $50,  
-        new_status = $51,
+        previous_status = COALESCE($50, support_candy_tickets.previous_status),
+        new_status = COALESCE($51, support_candy_tickets.new_status),
         data_json = $52;
     `;
 
@@ -576,14 +584,11 @@ app.get('/api/tickets', async (req, res) => {
       let agentName = 'Sin asignar';
       let agentId = null;
 
-      // Intentar obtener del assigned_agent primero
+      // Solo assigned_agent: last_reply_by es un ID de CLIENTE en Support Candy,
+      // no de agente, y cruzarlo con sc_agents mostraba a la persona equivocada
       if (t.assigned_agent) {
         const agentIds = t.assigned_agent.toString().split('|');
         agentId = parseInt(agentIds[0]);
-      }
-      // Si no hay assigned_agent, intentar con last_reply_by
-      else if (t.last_reply_by) {
-        agentId = parseInt(t.last_reply_by);
       }
 
       if (agentId) {
@@ -606,8 +611,8 @@ app.get('/api/tickets', async (req, res) => {
         customer: t.customer || '-',
         cust_26: t.cust_26 || '-',
         impact: getImpactNames(t.cust_41),
-        created: t.date_created ? new Date(t.date_created).toLocaleDateString('es-MX') : '-',
-        updated: t.date_updated ? new Date(t.date_updated).toLocaleDateString('es-MX') : '-'
+        created: t.date_created ? new Date(t.date_created).toLocaleDateString('es-MX', { timeZone: 'America/Mexico_City' }) : '-',
+        updated: t.date_updated ? new Date(t.date_updated).toLocaleDateString('es-MX', { timeZone: 'America/Mexico_City' }) : '-'
       };
     }));
 
