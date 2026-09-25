@@ -309,6 +309,113 @@ app.get('/api/tickets-por-impacto', async (req, res) => {
   }
 });
 
+// API: Tickets abiertos con rezago (más de 3 días SIN contar el tiempo "Con cliente")
+// No usa el filtro de fechas: siempre muestra lo que sigue abierto hoy
+app.get('/api/tickets-rezagados', async (req, res) => {
+  try {
+    // 1. Tickets abiertos del CAU con más de 3 días de antigüedad total
+    //    (si el total no llega a 3 días, descontando al cliente tampoco llegará)
+    const result = await pool.query(`
+      SELECT DISTINCT ON (t.ticket_id)
+        t.ticket_id, t.subject, t.cust_26, t.assigned_agent, t.date_created,
+        s.status_name_es
+      FROM support_candy_tickets t
+      LEFT JOIN sc_statuses s ON t.status = s.status_id
+      WHERE t.status IS NOT NULL
+        AND t.status NOT IN (5, 6)
+        AND t.date_created IS NOT NULL
+        AND t.date_created <= NOW() - INTERVAL '3 days'
+        AND EXISTS (
+          SELECT 1 FROM unnest(string_to_array(t.assigned_agent::text, '|')) AS ag(id)
+          WHERE TRIM(ag.id) IN ('22', '23', '17', '5', '3')
+        )
+      ORDER BY t.ticket_id, t.date_updated DESC
+    `);
+
+    const agentsResult = await pool.query('SELECT agent_id, agent_name FROM sc_agents');
+    const agentMap = {};
+    agentsResult.rows.forEach(a => { agentMap[a.agent_id.toString()] = a.agent_name; });
+
+    // 2. Histórico de estados de esos tickets (una sola consulta)
+    const ids = result.rows.map(r => r.ticket_id);
+    const historyByTicket = {};
+    if (ids.length > 0) {
+      const hist = await pool.query(`
+        SELECT tsh.ticket_id, tsh.changed_at,
+               s_prev.status_name_es AS prev_name,
+               s_new.status_name_es AS new_name
+        FROM ticket_state_history tsh
+        LEFT JOIN sc_statuses s_prev ON tsh.previous_status = s_prev.status_id
+        LEFT JOIN sc_statuses s_new ON tsh.new_status = s_new.status_id
+        WHERE tsh.ticket_id = ANY($1)
+        ORDER BY tsh.ticket_id, tsh.changed_at ASC
+      `, [ids]);
+      hist.rows.forEach(h => {
+        if (!historyByTicket[h.ticket_id]) historyByTicket[h.ticket_id] = [];
+        historyByTicket[h.ticket_id].push(h);
+      });
+    }
+
+    const normalize = (txt) => (txt || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+    const isCliente = (name) => normalize(name) === 'con cliente';
+    const now = new Date();
+    const DAY = 86400;
+
+    // 3. Calcular tiempo total, tiempo con cliente y tiempo real de atención
+    const tickets = result.rows.map(t => {
+      const created = new Date(t.date_created);
+      const totalSeconds = Math.max(0, (now - created) / 1000);
+      const history = historyByTicket[t.ticket_id] || [];
+      let clienteSeconds = 0;
+
+      if (history.length > 0) {
+        // Tramo inicial: desde la creación hasta el primer cambio
+        if (isCliente(history[0].prev_name)) {
+          clienteSeconds += Math.max(0, (new Date(history[0].changed_at) - created) / 1000);
+        }
+        // Cada estado dura hasta el siguiente cambio (o hasta hoy si es el actual)
+        history.forEach((h, i) => {
+          if (isCliente(h.new_name)) {
+            const start = new Date(h.changed_at);
+            const endT = history[i + 1] ? new Date(history[i + 1].changed_at) : now;
+            clienteSeconds += Math.max(0, (endT - start) / 1000);
+          }
+        });
+      }
+
+      const atencionSeconds = Math.max(0, totalSeconds - clienteSeconds);
+      const agentId = t.assigned_agent ? t.assigned_agent.toString().split('|')[0].trim() : null;
+      const dias = Math.round((atencionSeconds / DAY) * 10) / 10;
+
+      return {
+        id: t.ticket_id,
+        subject: t.subject || '',
+        instance: t.cust_26 || '-',
+        status: t.status_name_es || '-',
+        agent: (agentId && agentMap[agentId]) || 'Sin asignar',
+        dias,                                                      // sin contar tiempo con cliente
+        diasTotales: Math.round((totalSeconds / DAY) * 10) / 10,
+        diasCliente: Math.round((clienteSeconds / DAY) * 10) / 10,
+        sinHistorico: history.length === 0,
+        nivel: dias > 7 ? 'critico' : 'alerta'
+      };
+    })
+    .filter(t => t.dias > 3)
+    .sort((a, b) => b.dias - a.dias);
+
+    res.json({
+      total: tickets.length,
+      alerta: tickets.filter(t => t.nivel === 'alerta').length,   // 3 a 7 días
+      critico: tickets.filter(t => t.nivel === 'critico').length, // más de 7 días
+      tickets
+    });
+
+  } catch (error) {
+    console.error('Error en /api/tickets-rezagados:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // API: Obtener todos los tickets con detalles (SIN DUPLICADOS)
 app.get('/api/tickets', async (req, res) => {
   try {

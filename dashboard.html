@@ -190,6 +190,53 @@
       cursor: pointer;
     }
 
+    /* Tickets con rezago */
+    .aging-section {
+      margin-bottom: 40px;
+    }
+
+    .aging-summary {
+      display: flex;
+      gap: 15px;
+      margin-bottom: 15px;
+      flex-wrap: wrap;
+    }
+
+    .aging-pill {
+      padding: 10px 18px;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 14px;
+      color: white;
+    }
+
+    .aging-pill.alerta { background: #f0ad4e; }
+    .aging-pill.critico { background: #e53935; }
+
+    .aging-note {
+      font-size: 12px;
+      color: #888;
+      align-self: center;
+    }
+
+    .aging-chart-container {
+      background: white;
+      padding: 20px;
+      border-radius: 10px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+      position: relative;
+      cursor: pointer;
+    }
+
+    .aging-empty {
+      background: #e8f5e9;
+      color: #2e7d32;
+      padding: 15px;
+      border-radius: 8px;
+      text-align: center;
+      font-weight: 600;
+    }
+
     .chart-container h3 {
       font-size: 16px;
       color: #333;
@@ -588,6 +635,16 @@
       <div class="loading"><div class="spinner"></div>Cargando KPIs...</div>
     </div>
 
+    <div class="aging-section">
+      <h2 class="section-title">⏰ Tickets con rezago (más de 3 días sin contar tiempo con cliente)</h2>
+      <div id="agingSummary" class="aging-summary"></div>
+      <div id="agingChartWrapper" class="aging-chart-container">
+        <div id="agingChartBox" style="position: relative; height: 250px;">
+          <canvas id="agingChart"></canvas>
+        </div>
+      </div>
+    </div>
+
     <div class="charts-section">
       <h2 class="section-title">📈 Distribuciones</h2>
       <div class="charts-grid">
@@ -705,6 +762,7 @@
           loadChart('categoriaChart', 'tickets-por-categoria', params, 'Categoría'),
           loadChart('instanciaChart', 'tickets-por-instancia', params, 'Instancia'),
           loadChart('impactoChart', 'tickets-por-impacto', params, 'Impacto'),
+          loadAgingChart(),
           loadTickets(params)
         ]);
       } catch (error) {
@@ -807,6 +865,99 @@
         });
       } catch (error) {
         console.error(`Error cargando chart ${canvasId}:`, error);
+      }
+    }
+
+    async function loadAgingChart() {
+      try {
+        const response = await fetch('/api/tickets-rezagados');
+        const data = await response.json();
+
+        document.getElementById('agingSummary').innerHTML = `
+          <div class="aging-pill alerta">🟠 3 a 7 días: ${data.alerta}</div>
+          <div class="aging-pill critico">🔴 Más de 7 días: ${data.critico}</div>
+          <div class="aging-note">No cuenta el tiempo "Con cliente" · No depende del filtro de fechas · Clic en una barra para ver su timeline</div>
+        `;
+
+        if (charts['agingChart']) {
+          charts['agingChart'].destroy();
+          delete charts['agingChart'];
+        }
+
+        const box = document.getElementById('agingChartBox');
+
+        if (data.tickets.length === 0) {
+          box.style.height = 'auto';
+          box.innerHTML = '<div class="aging-empty">✅ No hay tickets con más de 3 días de atención pendiente</div>';
+          return;
+        }
+
+        // Altura según número de tickets (30px por barra)
+        box.style.height = Math.max(250, data.tickets.length * 30 + 60) + 'px';
+        if (!document.getElementById('agingChart')) {
+          box.innerHTML = '<canvas id="agingChart"></canvas>';
+        }
+
+        const tickets = data.tickets;
+        const ctx = document.getElementById('agingChart').getContext('2d');
+
+        charts['agingChart'] = new Chart(ctx, {
+          type: 'bar',
+          data: {
+            labels: tickets.map(t => `#${t.id} · ${t.instance}`),
+            datasets: [{
+              label: 'Días de atención',
+              data: tickets.map(t => t.dias),
+              backgroundColor: tickets.map(t => t.nivel === 'critico' ? '#e53935' : '#f0ad4e'),
+              borderRadius: 6,
+              borderSkipped: false
+            }]
+          },
+          options: {
+            indexAxis: 'y',
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { display: false },
+              tooltip: {
+                callbacks: {
+                  title: (items) => {
+                    const t = tickets[items[0].dataIndex];
+                    return `#${t.id} · ${t.subject}`;
+                  },
+                  label: (item) => {
+                    const t = tickets[item.dataIndex];
+                    const lines = [
+                      `⏰ ${t.dias} días de atención (sin cliente)`,
+                      `👥 ${t.diasCliente} días con cliente`,
+                      `📅 ${t.diasTotales} días en total`,
+                      `📌 Estado: ${t.status}`,
+                      `👤 ${t.agent}`,
+                      `🏢 ${t.instance}`
+                    ];
+                    if (t.sinHistorico) {
+                      lines.push('⚠️ Sin histórico de estados: se cuenta el tiempo total');
+                    }
+                    return lines;
+                  }
+                }
+              }
+            },
+            scales: {
+              x: {
+                beginAtZero: true,
+                title: { display: true, text: 'Días de atención (sin contar tiempo con cliente)' }
+              }
+            },
+            onClick: (event, elements) => {
+              if (elements.length > 0) {
+                openTimeline(tickets[elements[0].index].id);
+              }
+            }
+          }
+        });
+      } catch (error) {
+        console.error('Error cargando tickets con rezago:', error);
       }
     }
 
