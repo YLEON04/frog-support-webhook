@@ -74,6 +74,7 @@ app.post('/webhook/support-candy', async (req, res) => {
         assigned_agent = $8,
         category = $7,
         cust_41 = $48,
+        cust_26 = $30,
         date_updated = $10,
         last_reply_on = $19,
         last_reply_by = $20,
