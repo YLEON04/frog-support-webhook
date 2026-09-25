@@ -187,6 +187,7 @@
       box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
       position: relative;
       height: 350px;
+      cursor: pointer;
     }
 
     .chart-container h3 {
@@ -456,6 +457,32 @@
       color: #856404;
       text-align: center;
     }
+
+    /* Filter Badge */
+    #filterBadge {
+      background: #667eea;
+      color: white;
+      padding: 10px 15px;
+      border-radius: 6px;
+      margin-bottom: 15px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    #filterBadge button {
+      background: white;
+      color: #667eea;
+      border: none;
+      padding: 5px 10px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-weight: bold;
+    }
+
+    #filterBadge button:hover {
+      background: #f0f0f0;
+    }
   </style>
 </head>
 <body>
@@ -637,230 +664,96 @@
         console.error('Error cargando KPIs:', error);
       }
     }
-async function loadChart(canvasId, endpoint, params, label) {
-  try {
-    const response = await fetch(`/api/${endpoint}?${params}`);
-    const data = await response.json();
 
-    const ctx = document.getElementById(canvasId).getContext('2d');
-    
-    if (charts[canvasId]) {
-      charts[canvasId].destroy();
-    }
+    async function loadChart(canvasId, endpoint, params, label) {
+      try {
+        const response = await fetch(`/api/${endpoint}?${params}`);
+        const data = await response.json();
 
-    charts[canvasId] = new Chart(ctx, {
-      type: 'bar',
-      data: {
-        labels: data.labels,
-        datasets: [{
-          label: label,
-          data: data.data,
-          backgroundColor: [
-            '#667eea', '#764ba2', '#f093fb', '#4facfe', '#00f2fe',
-            '#43e97b', '#fa709a', '#fee140', '#30cfd0', '#330867',
-            '#667eea', '#764ba2', '#f093fb', '#4facfe', '#00f2fe',
-            '#43e97b', '#fa709a', '#fee140', '#30cfd0', '#330867'
-          ],
-          borderRadius: 6,
-          borderSkipped: false
-        }]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: { display: false }
-        },
-        scales: {
-          y: {
-            beginAtZero: true,
-            ticks: { stepSize: 1 }
-          }
-        },
-        onClick: (event, elements) => {
-          if (elements.length > 0) {
-            const index = elements[0].index;
-            const selectedLabel = data.labels[index];
-            
-            // Filtrar según el tipo de gráfica
-            if (canvasId === 'instanciaChart') {
-              filterTicketsByInstance(selectedLabel);
-            } else if (canvasId === 'agenteChart') {
-              filterTicketsByAgent(selectedLabel);
-            } else if (canvasId === 'estadoChart') {
-              filterTicketsByStatus(selectedLabel);
-            } else if (canvasId === 'categoriaChart') {
-              filterTicketsByCategory(selectedLabel);
+        const ctx = document.getElementById(canvasId).getContext('2d');
+        
+        if (charts[canvasId]) {
+          charts[canvasId].destroy();
+        }
+
+        charts[canvasId] = new Chart(ctx, {
+          type: 'bar',
+          data: {
+            labels: data.labels,
+            datasets: [{
+              label: label,
+              data: data.data,
+              backgroundColor: [
+                '#667eea', '#764ba2', '#f093fb', '#4facfe', '#00f2fe',
+                '#43e97b', '#fa709a', '#fee140', '#30cfd0', '#330867',
+                '#667eea', '#764ba2', '#f093fb', '#4facfe', '#00f2fe',
+                '#43e97b', '#fa709a', '#fee140', '#30cfd0', '#330867'
+              ],
+              borderRadius: 6,
+              borderSkipped: false
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { display: false }
+            },
+            scales: {
+              y: {
+                beginAtZero: true,
+                ticks: { stepSize: 1 }
+              }
+            },
+            onClick: (event, elements) => {
+              if (elements.length > 0) {
+                const index = elements[0].index;
+                const selectedLabel = data.labels[index];
+                
+                // Filtrar según el tipo de gráfica
+                if (canvasId === 'instanciaChart') {
+                  filterTicketsByInstance(selectedLabel);
+                } else if (canvasId === 'agenteChart') {
+                  filterTicketsByAgent(selectedLabel);
+                } else if (canvasId === 'estadoChart') {
+                  filterTicketsByStatus(selectedLabel);
+                } else if (canvasId === 'categoriaChart') {
+                  filterTicketsByCategory(selectedLabel);
+                }
+              }
             }
           }
-        }
-      }
-    });
-  } catch (error) {
-    console.error(`Error cargando chart ${canvasId}:`, error);
-  }
-}
-
-// Funciones de filtro
-function filterTicketsByInstance(instance) {
-  const table = document.querySelector('table tbody');
-  const rows = table.querySelectorAll('tr');
-  let visibleCount = 0;
-
-  const normalizedFilter = instance.toLowerCase().trim();
-
-  rows.forEach(row => {
-    const instanceCell = row.cells[6]; // Columna INSTANCIA
-    const cellText = instanceCell.textContent.trim().toLowerCase();
-    
-    if (cellText === normalizedFilter) {
-      row.style.display = '';
-      visibleCount++;
-    } else {
-      row.style.display = 'none';
-    }
-  });
-
-  updateFilterBadge(`Instancia: ${instance}`, visibleCount);
-}
-
-function filterTicketsByAgent(agent) {
-  const table = document.querySelector('table tbody');
-  const rows = table.querySelectorAll('tr');
-  let visibleCount = 0;
-
-  // Normalizar el agente del filtro (remover acentos, lowercase)
-  const normalizedFilter = agent.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-
-  rows.forEach(row => {
-    const agentCell = row.cells[4]; // Columna AGENTE
-    const cellText = agentCell.textContent.trim();
-    
-    // Normalizar el texto de la celda igual
-    const normalizedCell = cellText.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-    
-    if (normalizedCell === normalizedFilter) {
-      row.style.display = '';
-      visibleCount++;
-    } else {
-      row.style.display = 'none';
-    }
-  });
-
-  updateFilterBadge(`Agente: ${agent}`, visibleCount);
-}
-
-function filterTicketsByStatus(status) {
-  const table = document.querySelector('table tbody');
-  const rows = table.querySelectorAll('tr');
-  let visibleCount = 0;
-
-  rows.forEach(row => {
-    const statusCell = row.cells[2]; // Columna ESTADO
-    const statusText = statusCell.textContent.trim().toUpperCase();
-    if (statusText.includes(status.toUpperCase())) {
-      row.style.display = '';
-      visibleCount++;
-    } else {
-      row.style.display = 'none';
-    }
-  });
-
-  updateFilterBadge(`Estado: ${status}`, visibleCount);
-}
-function filterTicketsByCategory(category) {
-  const table = document.querySelector('table tbody');
-  const rows = table.querySelectorAll('tr');
-  let visibleCount = 0;
-
-  const normalizedFilter = category.toLowerCase().trim();
-
-  rows.forEach(row => {
-    const categoryCell = row.cells[9]; // Columna CATEGORIA (ajusta si es diferente)
-    
-    // Si la celda no existe, buscar en todas las celdas
-    let found = false;
-    for (let i = 0; i < row.cells.length; i++) {
-      const cellText = row.cells[i].textContent.trim().toLowerCase();
-      if (cellText === normalizedFilter && i !== 0) { // excluir columna ID
-        found = true;
-        break;
+        });
+      } catch (error) {
+        console.error(`Error cargando chart ${canvasId}:`, error);
       }
     }
 
-    if (found) {
-      row.style.display = '';
-      visibleCount++;
-    } else {
-      row.style.display = 'none';
-    }
-  });
-
-  updateFilterBadge(`Categoría: ${category}`, visibleCount);
-}
-
-function updateFilterBadge(filterText, count) {
-  let badge = document.getElementById('filterBadge');
-  if (!badge) {
-    badge = document.createElement('div');
-    badge.id = 'filterBadge';
-    badge.style.cssText = `
-      background: #667eea;
-      color: white;
-      padding: 10px 15px;
-      border-radius: 6px;
-      margin-bottom: 15px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    `;
-    document.querySelector('.tickets-section').insertBefore(badge, document.querySelector('table'));
-  }
-
-  badge.innerHTML = `
-    <span>${filterText} (${count} tickets)</span>
-    <button onclick="clearFilter()" style="background: white; color: #667eea; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer; font-weight: bold;">✕ Limpiar</button>
-  `;
-}
-
-function clearFilter() {
-  const table = document.querySelector('table tbody');
-  const rows = table.querySelectorAll('tr');
-  
-  rows.forEach(row => {
-    row.style.display = '';
-  });
-
-  const badge = document.getElementById('filterBadge');
-  if (badge) {
-    badge.remove();
-  }
-}
-
-async function loadTickets(params) {
+    async function loadTickets(params) {
       try {
         const response = await fetch(`/api/tickets?${params}`);
         const tickets = await response.json();
 
         let html = '<table><thead><tr><th>ID</th><th>Asunto</th><th>Estado</th><th>Prioridad</th><th>Agente</th><th>Cliente</th><th>Categoría</th><th>Instancia</th><th>Creado</th><th>Actualizado</th></tr></thead><tbody>';
+
         tickets.forEach(t => {
           const statusClass = `status-${t.status.toLowerCase().replace(/\s+/g, '-')}`;
           const priorityClass = `priority-${t.priority.toLowerCase()}`;
 
           html += `
-          <tr onclick="openTimeline(${t.id})">
-            <td class="ticket-id">#${t.id}</td>
-            <td>${t.subject}</td>
-            <td><span class="status-badge ${statusClass}">${t.status}</span></td>
-            <td><span class="${priorityClass}">${t.priority}</span></td>
-            <td>${t.agent}</td>
-            <td>${t.customer}</td>
-            <td>${t.category}</td>
-            <td>${t.cust_26}</td>
-            <td>${t.created}</td>
-            <td>${t.updated}</td>
-          </tr>
-        `;
+            <tr onclick="openTimeline(${t.id})">
+              <td class="ticket-id">#${t.id}</td>
+              <td>${t.subject}</td>
+              <td><span class="status-badge ${statusClass}">${t.status}</span></td>
+              <td><span class="${priorityClass}">${t.priority}</span></td>
+              <td>${t.agent}</td>
+              <td>${t.customer}</td>
+              <td>${t.category}</td>
+              <td>${t.cust_26}</td>
+              <td>${t.created}</td>
+              <td>${t.updated}</td>
+            </tr>
+          `;
         });
 
         html += '</tbody></table>';
@@ -918,6 +811,121 @@ async function loadTickets(params) {
       const modal = document.getElementById('timelineModal');
       if (event.target == modal) {
         modal.style.display = 'none';
+      }
+    }
+
+    // Funciones de filtro
+    function filterTicketsByInstance(instance) {
+      const table = document.querySelector('table tbody');
+      const rows = table.querySelectorAll('tr');
+      let visibleCount = 0;
+
+      const normalizedFilter = instance.toLowerCase().trim();
+
+      rows.forEach(row => {
+        const instanceCell = row.cells[7]; // INSTANCIA está en índice 7
+        const cellText = instanceCell.textContent.trim().toLowerCase();
+        
+        if (cellText === normalizedFilter) {
+          row.style.display = '';
+          visibleCount++;
+        } else {
+          row.style.display = 'none';
+        }
+      });
+
+      updateFilterBadge(`Instancia: ${instance}`, visibleCount);
+    }
+
+    function filterTicketsByAgent(agent) {
+      const table = document.querySelector('table tbody');
+      const rows = table.querySelectorAll('tr');
+      let visibleCount = 0;
+
+      const normalizedFilter = agent.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+      rows.forEach(row => {
+        const agentCell = row.cells[4]; // AGENTE está en índice 4
+        const cellText = agentCell.textContent.trim();
+        const normalizedCell = cellText.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        
+        if (normalizedCell === normalizedFilter) {
+          row.style.display = '';
+          visibleCount++;
+        } else {
+          row.style.display = 'none';
+        }
+      });
+
+      updateFilterBadge(`Agente: ${agent}`, visibleCount);
+    }
+
+    function filterTicketsByStatus(status) {
+      const table = document.querySelector('table tbody');
+      const rows = table.querySelectorAll('tr');
+      let visibleCount = 0;
+
+      rows.forEach(row => {
+        const statusCell = row.cells[2]; // ESTADO está en índice 2
+        const statusText = statusCell.textContent.trim().toUpperCase();
+        if (statusText.includes(status.toUpperCase())) {
+          row.style.display = '';
+          visibleCount++;
+        } else {
+          row.style.display = 'none';
+        }
+      });
+
+      updateFilterBadge(`Estado: ${status}`, visibleCount);
+    }
+
+    function filterTicketsByCategory(category) {
+      const table = document.querySelector('table tbody');
+      const rows = table.querySelectorAll('tr');
+      let visibleCount = 0;
+
+      const normalizedFilter = category.toLowerCase().trim();
+
+      rows.forEach(row => {
+        const categoryCell = row.cells[6]; // CATEGORÍA está en índice 6
+        const cellText = categoryCell.textContent.trim().toLowerCase();
+        
+        if (cellText === normalizedFilter) {
+          row.style.display = '';
+          visibleCount++;
+        } else {
+          row.style.display = 'none';
+        }
+      });
+
+      updateFilterBadge(`Categoría: ${category}`, visibleCount);
+    }
+
+    function updateFilterBadge(filterText, count) {
+      let badge = document.getElementById('filterBadge');
+      if (!badge) {
+        badge = document.createElement('div');
+        badge.id = 'filterBadge';
+        document.querySelector('.tickets-section').insertBefore(badge, document.querySelector('table'));
+      }
+
+      badge.innerHTML = `
+        <span>${filterText} (${count} tickets)</span>
+        <button onclick="clearFilter()">✕ Limpiar</button>
+      `;
+    }
+
+    function clearFilter() {
+      const table = document.querySelector('table tbody');
+      const rows = table.querySelectorAll('tr');
+      
+      rows.forEach(row => {
+        row.style.display = '';
+      });
+
+      const badge = document.getElementById('filterBadge');
+      if (badge) {
+        badge.remove();
       }
     }
 
