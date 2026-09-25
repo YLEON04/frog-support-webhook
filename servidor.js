@@ -542,6 +542,245 @@ app.get('/api/rendimiento-agentes', async (req, res) => {
   }
 });
 
+// ===== Helpers compartidos para análisis =====
+const CAU_AGENT_IDS = ['22', '23', '17', '5', '3'];
+const normalizeTxt = (txt) => (txt || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+const grupoEstado = (statusName) => {
+  const n = normalizeTxt(statusName);
+  if (n === 'sin asignar') return 'espera';
+  if (n === 'cau') return 'cau';
+  if (n === 'con cliente') return 'cliente';
+  if (n === 'cerrado') return 'cerrado';
+  return 'otras';
+};
+// Filtro exacto de agentes del CAU (evita que 5 coincida con 25)
+const CAU_AGENT_FILTER = `
+  EXISTS (
+    SELECT 1 FROM unnest(string_to_array(t.assigned_agent::text, '|')) AS ag(id)
+    WHERE TRIM(ag.id) IN ('22', '23', '17', '5', '3')
+  )`;
+// Fecha local de México (las fechas se guardan en UTC)
+const fechaMX = (col) => `to_char((${col} AT TIME ZONE 'UTC' AT TIME ZONE 'America/Mexico_City')::date, 'YYYY-MM-DD')`;
+
+// API 1: Tendencia de tickets creados vs cerrados
+// Por día si el rango es de hasta 45 días; por semana si es mayor
+app.get('/api/tendencia-tickets', async (req, res) => {
+  try {
+    const { startDate, endDate } = req.query;
+
+    const result = await pool.query(`
+      SELECT DISTINCT ON (t.ticket_id)
+        t.ticket_id,
+        ${fechaMX('t.date_created')} AS creado,
+        CASE WHEN t.status = 5 THEN ${fechaMX('COALESCE(t.date_closed, t.date_updated)')} END AS cerrado
+      FROM support_candy_tickets t
+      WHERE t.date_created IS NOT NULL
+        AND (t.status IS NULL OR t.status <> 6)
+        AND ${CAU_AGENT_FILTER}
+      ORDER BY t.ticket_id, t.date_updated DESC
+    `);
+
+    const rows = result.rows;
+    const hoyMX = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
+
+    // Rango: el del filtro, o desde el primer ticket hasta hoy
+    let desde = startDate;
+    let hasta = endDate || hoyMX;
+    if (!desde) {
+      desde = rows.reduce((min, r) => (r.creado < min ? r.creado : min), hoyMX);
+    }
+
+    const toDate = (str) => new Date(str + 'T00:00:00Z');
+    const toStr = (d) => d.toISOString().slice(0, 10);
+    const spanDias = Math.round((toDate(hasta) - toDate(desde)) / 86400000) + 1;
+    const porSemana = spanDias > 45;
+
+    // Clave del bucket: el día, o el lunes de esa semana
+    const bucketDe = (str) => {
+      if (!porSemana) return str;
+      const d = toDate(str);
+      const dow = (d.getUTCDay() + 6) % 7; // lunes = 0
+      d.setUTCDate(d.getUTCDate() - dow);
+      return toStr(d);
+    };
+
+    // Crear todos los buckets del rango (incluye los que tienen 0)
+    const buckets = {};
+    const cursor = toDate(bucketDe(desde));
+    const fin = toDate(hasta);
+    while (cursor <= fin) {
+      buckets[toStr(cursor)] = { creados: 0, cerrados: 0 };
+      cursor.setUTCDate(cursor.getUTCDate() + (porSemana ? 7 : 1));
+    }
+
+    rows.forEach(r => {
+      if (r.creado >= desde && r.creado <= hasta) {
+        const b = bucketDe(r.creado);
+        if (buckets[b]) buckets[b].creados++;
+      }
+      if (r.cerrado && r.cerrado >= desde && r.cerrado <= hasta) {
+        const b = bucketDe(r.cerrado);
+        if (buckets[b]) buckets[b].cerrados++;
+      }
+    });
+
+    const keys = Object.keys(buckets).sort();
+    const etiqueta = (k) => {
+      const [y, m, d] = k.split('-');
+      return porSemana ? `Sem. ${d}/${m}` : `${d}/${m}`;
+    };
+
+    const creados = keys.map(k => buckets[k].creados);
+    const cerrados = keys.map(k => buckets[k].cerrados);
+
+    res.json({
+      granularidad: porSemana ? 'semana' : 'dia',
+      labels: keys.map(etiqueta),
+      creados,
+      cerrados,
+      totalCreados: creados.reduce((a, b) => a + b, 0),
+      totalCerrados: cerrados.reduce((a, b) => a + b, 0)
+    });
+
+  } catch (error) {
+    console.error('Error en /api/tendencia-tickets:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API 2: ¿Dónde se van las horas? Tiempo promedio por estado (por ticket)
+app.get('/api/tiempo-por-estado', async (req, res) => {
+  try {
+    const { startDate, endDate } = req.query;
+    const dateFilter = getDateFilter(startDate, endDate);
+
+    const hist = await pool.query(`
+      SELECT tsh.ticket_id, tsh.changed_at, t.date_created,
+             s_prev.status_name_es AS prev_name,
+             s_new.status_name_es AS new_name
+      FROM ticket_state_history tsh
+      JOIN (
+        SELECT DISTINCT ON (t.ticket_id) t.ticket_id, t.date_created
+        FROM support_candy_tickets t
+        WHERE (t.status IS NULL OR t.status <> 6)
+          AND ${CAU_AGENT_FILTER}
+          ${dateFilter}
+        ORDER BY t.ticket_id, t.date_updated DESC
+      ) t ON t.ticket_id = tsh.ticket_id
+      LEFT JOIN sc_statuses s_prev ON tsh.previous_status = s_prev.status_id
+      LEFT JOIN sc_statuses s_new ON tsh.new_status = s_new.status_id
+      ORDER BY tsh.ticket_id, tsh.changed_at ASC
+    `);
+
+    const byTicket = {};
+    hist.rows.forEach(h => {
+      if (!byTicket[h.ticket_id]) byTicket[h.ticket_id] = [];
+      byTicket[h.ticket_id].push(h);
+    });
+
+    const now = new Date();
+    // estado -> { segundos por ticket }
+    const porEstado = {};
+    const sumar = (estado, ticketId, seconds) => {
+      if (!estado || grupoEstado(estado) === 'cerrado' || seconds < 0) return;
+      if (!porEstado[estado]) porEstado[estado] = {};
+      porEstado[estado][ticketId] = (porEstado[estado][ticketId] || 0) + seconds;
+    };
+
+    Object.keys(byTicket).forEach(ticketId => {
+      const rows = byTicket[ticketId];
+      const created = new Date(rows[0].date_created);
+      // Tramo inicial
+      sumar(rows[0].prev_name || 'Sin asignar', ticketId, (new Date(rows[0].changed_at) - created) / 1000);
+      // Tramos por cambio (el actual cuenta hasta hoy)
+      rows.forEach((row, i) => {
+        const next = rows[i + 1];
+        const endT = next ? new Date(next.changed_at) : now;
+        sumar(row.new_name, ticketId, (endT - new Date(row.changed_at)) / 1000);
+      });
+    });
+
+    const estados = Object.keys(porEstado).map(estado => {
+      const valores = Object.values(porEstado[estado]);
+      const promedio = valores.reduce((a, b) => a + b, 0) / valores.length;
+      return {
+        estado,
+        grupo: grupoEstado(estado),
+        promedioHoras: Math.round((promedio / 3600) * 10) / 10,
+        tickets: valores.length
+      };
+    }).sort((a, b) => b.promedioHoras - a.promedioHoras);
+
+    res.json({
+      ticketsConHistorico: Object.keys(byTicket).length,
+      estados
+    });
+
+  } catch (error) {
+    console.error('Error en /api/tiempo-por-estado:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API 3: Impacto por instancia (Stoppers primero)
+app.get('/api/impacto-por-instancia', async (req, res) => {
+  try {
+    const { startDate, endDate } = req.query;
+    const dateFilter = getDateFilter(startDate, endDate);
+
+    const result = await pool.query(`
+      SELECT t.cust_26 AS instancia, i.name AS impacto, i.sort_order,
+             COUNT(DISTINCT t.ticket_id) AS cantidad
+      FROM (
+        SELECT DISTINCT ON (t.ticket_id) t.*
+        FROM support_candy_tickets t
+        WHERE (t.status IS NULL OR t.status <> 6)
+          AND t.cust_26 IS NOT NULL AND t.cust_26 <> ''
+          AND ${CAU_AGENT_FILTER}
+          ${dateFilter}
+        ORDER BY t.ticket_id, t.date_updated DESC
+      ) t
+      CROSS JOIN LATERAL regexp_split_to_table(t.cust_41::text, '[^0-9]+') AS imp(val)
+      JOIN sc_impacts i ON imp.val <> '' AND i.id = imp.val::integer
+      GROUP BY t.cust_26, i.name, i.sort_order
+    `);
+
+    const impactosResult = await pool.query('SELECT name FROM sc_impacts ORDER BY sort_order');
+    const impactos = impactosResult.rows.map(r => r.name);
+
+    // instancia -> { impacto: cantidad }
+    const mapa = {};
+    result.rows.forEach(r => {
+      if (!mapa[r.instancia]) mapa[r.instancia] = {};
+      mapa[r.instancia][r.impacto] = parseInt(r.cantidad);
+    });
+
+    const stopperName = impactos.find(n => normalizeTxt(n) === 'stopper') || 'Stopper';
+
+    // Ordenar: más Stoppers primero, luego más tickets en total
+    const instancias = Object.keys(mapa).sort((a, b) => {
+      const sa = mapa[a][stopperName] || 0;
+      const sb = mapa[b][stopperName] || 0;
+      if (sb !== sa) return sb - sa;
+      const ta = Object.values(mapa[a]).reduce((x, y) => x + y, 0);
+      const tb = Object.values(mapa[b]).reduce((x, y) => x + y, 0);
+      return tb - ta;
+    }).slice(0, 15);
+
+    res.json({
+      labels: instancias,
+      datasets: impactos.map(nombre => ({
+        impacto: nombre,
+        data: instancias.map(inst => mapa[inst][nombre] || 0)
+      }))
+    });
+
+  } catch (error) {
+    console.error('Error en /api/impacto-por-instancia:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // API: Obtener todos los tickets con detalles (SIN DUPLICADOS)
 app.get('/api/tickets', async (req, res) => {
   try {

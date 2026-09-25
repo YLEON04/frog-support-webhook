@@ -613,6 +613,28 @@
       margin-top: 8px;
     }
 
+    /* Tendencias y análisis */
+    .analysis-section {
+      margin-bottom: 40px;
+    }
+
+    .analysis-block {
+      margin-bottom: 25px;
+    }
+
+    .analysis-block h3 {
+      font-size: 16px;
+      color: #333;
+      margin-bottom: 15px;
+    }
+
+    .analysis-info {
+      font-size: 12px;
+      font-weight: normal;
+      color: #888;
+      margin-left: 8px;
+    }
+
     /* Paginación */
     .pagination {
       display: flex;
@@ -757,6 +779,28 @@
       <div id="rendimientoTable" class="performance-table"></div>
     </div>
 
+    <div class="analysis-section">
+      <h2 class="section-title">📊 Tendencias y análisis</h2>
+
+      <div class="aging-chart-container analysis-block">
+        <h3>📈 Creados vs. cerrados <span id="tendenciaInfo" class="analysis-info"></span></h3>
+        <div style="position: relative; height: 300px;">
+          <canvas id="tendenciaChart"></canvas>
+        </div>
+      </div>
+
+      <div class="charts-grid">
+        <div class="chart-container">
+          <h3>⏱️ ¿Dónde se van las horas? <span id="horasInfo" class="analysis-info"></span></h3>
+          <canvas id="horasEstadoChart"></canvas>
+        </div>
+        <div class="chart-container">
+          <h3>🚨 Impacto por instancia (Stoppers primero)</h3>
+          <canvas id="impactoInstanciaChart"></canvas>
+        </div>
+      </div>
+    </div>
+
     <div class="charts-section">
       <h2 class="section-title">📈 Distribuciones</h2>
       <div class="charts-grid">
@@ -876,6 +920,9 @@
           loadChart('impactoChart', 'tickets-por-impacto', params, 'Impacto'),
           loadAgingChart(),
           loadPerformance(params),
+          loadTendencia(params),
+          loadHorasPorEstado(params),
+          loadImpactoPorInstancia(params),
           loadTickets(params)
         ]);
       } catch (error) {
@@ -1197,6 +1244,168 @@
 
       } catch (error) {
         console.error('Error cargando rendimiento:', error);
+      }
+    }
+
+    async function loadTendencia(params) {
+      try {
+        const response = await fetch(`/api/tendencia-tickets?${params}`);
+        const data = await response.json();
+
+        const diferencia = data.totalCreados - data.totalCerrados;
+        const balance = diferencia > 0
+          ? `🔺 backlog creció ${diferencia}`
+          : (diferencia < 0 ? `🔻 backlog bajó ${Math.abs(diferencia)}` : '⚖️ backlog estable');
+        document.getElementById('tendenciaInfo').textContent =
+          `Por ${data.granularidad} · ${data.totalCreados} creados · ${data.totalCerrados} cerrados · ${balance}`;
+
+        if (charts['tendenciaChart']) charts['tendenciaChart'].destroy();
+
+        const ctx = document.getElementById('tendenciaChart').getContext('2d');
+        charts['tendenciaChart'] = new Chart(ctx, {
+          type: 'line',
+          data: {
+            labels: data.labels,
+            datasets: [
+              {
+                label: 'Creados',
+                data: data.creados,
+                borderColor: '#667eea',
+                backgroundColor: 'rgba(102, 126, 234, 0.15)',
+                fill: true,
+                tension: 0.3,
+                borderWidth: 3,
+                pointRadius: 3
+              },
+              {
+                label: 'Cerrados',
+                data: data.cerrados,
+                borderColor: '#43a047',
+                backgroundColor: 'rgba(67, 160, 71, 0.15)',
+                fill: true,
+                tension: 0.3,
+                borderWidth: 3,
+                pointRadius: 3
+              }
+            ]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: { legend: { position: 'top' } },
+            scales: {
+              y: { beginAtZero: true, ticks: { stepSize: 1 } }
+            }
+          }
+        });
+      } catch (error) {
+        console.error('Error cargando tendencia:', error);
+      }
+    }
+
+    async function loadHorasPorEstado(params) {
+      try {
+        const response = await fetch(`/api/tiempo-por-estado?${params}`);
+        const data = await response.json();
+        const estados = data.estados || [];
+
+        document.getElementById('horasInfo').textContent = `${data.ticketsConHistorico} tickets con histórico`;
+
+        if (charts['horasEstadoChart']) charts['horasEstadoChart'].destroy();
+
+        const colores = { espera: '#f0ad4e', cau: '#e53935', cliente: '#43a047', otras: '#764ba2' };
+        const formatHoras = (h) => h < 1 ? `${Math.round(h * 60)} min` : (h >= 48 ? `${Math.round(h / 24 * 10) / 10} días` : `${h} h`);
+
+        const ctx = document.getElementById('horasEstadoChart').getContext('2d');
+        charts['horasEstadoChart'] = new Chart(ctx, {
+          type: 'bar',
+          data: {
+            labels: estados.map(e => e.estado),
+            datasets: [{
+              label: 'Horas promedio por ticket',
+              data: estados.map(e => e.promedioHoras),
+              backgroundColor: estados.map(e => colores[e.grupo] || '#667eea'),
+              borderRadius: 6,
+              borderSkipped: false
+            }]
+          },
+          options: {
+            indexAxis: 'y',
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { display: false },
+              tooltip: {
+                callbacks: {
+                  label: (item) => {
+                    const e = estados[item.dataIndex];
+                    return [`⏱️ ${formatHoras(e.promedioHoras)} en promedio`, `🎫 ${e.tickets} tickets pasaron por aquí`];
+                  }
+                }
+              }
+            },
+            scales: {
+              x: { beginAtZero: true, title: { display: true, text: 'Horas promedio' } }
+            },
+            onClick: (event, elements) => {
+              if (elements.length > 0) {
+                filterTicketsByStatus(estados[elements[0].index].estado);
+              }
+            }
+          }
+        });
+      } catch (error) {
+        console.error('Error cargando horas por estado:', error);
+      }
+    }
+
+    async function loadImpactoPorInstancia(params) {
+      try {
+        const response = await fetch(`/api/impacto-por-instancia?${params}`);
+        const data = await response.json();
+
+        if (charts['impactoInstanciaChart']) charts['impactoInstanciaChart'].destroy();
+
+        const normalize = (txt) => txt.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+        const colorImpacto = (nombre) => {
+          const n = normalize(nombre);
+          if (n === 'stopper') return '#e53935';
+          if (n === 'issue') return '#f0ad4e';
+          if (n === 'nice to have') return '#4facfe';
+          return '#43a047'; // Nueva funcionalidad
+        };
+
+        const ctx = document.getElementById('impactoInstanciaChart').getContext('2d');
+        charts['impactoInstanciaChart'] = new Chart(ctx, {
+          type: 'bar',
+          data: {
+            labels: data.labels,
+            datasets: data.datasets.map(ds => ({
+              label: ds.impacto,
+              data: ds.data,
+              backgroundColor: colorImpacto(ds.impacto),
+              borderRadius: 4
+            }))
+          },
+          options: {
+            indexAxis: 'y',
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { position: 'top' } },
+            scales: {
+              x: { stacked: true, beginAtZero: true, ticks: { stepSize: 1 } },
+              y: { stacked: true }
+            },
+            onClick: (event, elements) => {
+              if (elements.length > 0) {
+                filterTicketsByInstance(data.labels[elements[0].index]);
+              }
+            }
+          }
+        });
+      } catch (error) {
+        console.error('Error cargando impacto por instancia:', error);
       }
     }
 
