@@ -23,6 +23,16 @@ const fixDate = (dateStr) => {
   return dateStr;
 };
 
+// Helper para campos multi-select (ej. cust_41 Impacto): guarda siempre como "6|7"
+const normalizeMulti = (value) => {
+  if (value === undefined || value === null || value === '') return null;
+  const ids = Array.isArray(value)
+    ? value
+    : value.toString().split(/[^0-9]+/);
+  const clean = ids.map(v => v.toString().trim()).filter(v => v !== '');
+  return clean.length ? clean.join('|') : null;
+};
+
 // WEBHOOK: Recibir datos de Support Candy
 app.post('/webhook/support-candy', async (req, res) => {
   try {
@@ -55,6 +65,7 @@ app.post('/webhook/support-candy', async (req, res) => {
         subject = $4,
         assigned_agent = $8,
         category = $7,
+        cust_41 = $48,
         date_updated = $10,
         last_reply_on = $19,
         last_reply_by = $20,
@@ -76,7 +87,7 @@ app.post('/webhook/support-candy', async (req, res) => {
       ticket.cust_31 || '', ticket.cust_32 || '', ticket.cust_33 || '', fixDate(ticket.cust_34),
       ticket.pin || 0, ticket.rating || 0, ticket.sf_feedback || '', fixDate(ticket.sf_date),
       fixDate(ticket.sla), ticket.od_count || 0, ticket.od_email || 0, ticket.sla_policy || 0,
-      ticket.time_spent || '', ticket.cust_40 || null, ticket.cust_41 || null, ticket.cust_42 || '',
+      ticket.time_spent || '', ticket.cust_40 || null, normalizeMulti(ticket.cust_41), ticket.cust_42 || '',
       changeData.previous || null, changeData.new || null, JSON.stringify(data)
     ];
 
@@ -248,7 +259,44 @@ app.get('/api/tickets-por-instancia', async (req, res) => {
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
-});// API: Obtener todos los tickets con detalles (SIN DUPLICADOS)
+});
+
+// API: Obtener tickets por impacto (cust_41, multi-select)
+app.get('/api/tickets-por-impacto', async (req, res) => {
+  try {
+    const { startDate, endDate } = req.query;
+    const dateFilter = getDateFilter(startDate, endDate);
+
+    const result = await pool.query(`
+      SELECT i.id, i.name, i.sort_order, COUNT(DISTINCT t.ticket_id) as cantidad
+      FROM sc_impacts i
+      LEFT JOIN (
+        SELECT t.ticket_id, imp.val
+        FROM support_candy_tickets t
+        CROSS JOIN LATERAL regexp_split_to_table(t.cust_41::text, '[^0-9]+') AS imp(val)
+        WHERE imp.val <> ''
+          AND EXISTS (
+            SELECT 1 FROM unnest(string_to_array(t.assigned_agent::text, '|')) AS ag(id)
+            WHERE TRIM(ag.id) IN ('22', '23', '17', '5', '3')
+          )
+          ${dateFilter}
+      ) t ON t.val::integer = i.id
+      GROUP BY i.id, i.name, i.sort_order
+      ORDER BY i.sort_order ASC
+    `);
+
+    res.json({
+      labels: result.rows.map(r => r.name),
+      data: result.rows.map(r => parseInt(r.cantidad || 0))
+    });
+
+  } catch (error) {
+    console.error('Error en /api/tickets-por-impacto:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Obtener todos los tickets con detalles (SIN DUPLICADOS)
 app.get('/api/tickets', async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
@@ -257,7 +305,7 @@ app.get('/api/tickets', async (req, res) => {
     const result = await pool.query(`
       SELECT DISTINCT ON (t.ticket_id)
         t.ticket_id, t.subject, t.status, t.priority, t.assigned_agent, t.category, t.customer,
-        t.date_created, t.date_updated, t.date_closed, t.cust_26, t.last_reply_by,
+        t.date_created, t.date_updated, t.date_closed, t.cust_26, t.cust_41, t.last_reply_by,
         s.status_name_es,
         c.category_name
       FROM support_candy_tickets t
@@ -270,6 +318,19 @@ app.get('/api/tickets', async (req, res) => {
 
     const priorityMap = {
       '1': 'Low', '2': 'Medium', '3': 'High', '4': 'Urgent'
+    };
+
+    // Catálogo de impactos (una sola consulta)
+    const impactResult = await pool.query('SELECT id, name FROM sc_impacts ORDER BY sort_order');
+    const impactMap = {};
+    impactResult.rows.forEach(r => { impactMap[r.id.toString()] = r.name; });
+
+    const getImpactNames = (raw) => {
+      if (!raw) return '-';
+      const names = raw.toString().split(/[^0-9]+/)
+        .filter(v => v !== '')
+        .map(id => impactMap[id] || `Impacto ${id}`);
+      return names.length ? names.join(', ') : '-';
     };
 
     // Obtener nombre del agente por separado
@@ -306,6 +367,7 @@ app.get('/api/tickets', async (req, res) => {
         category: t.category_name || '-',
         customer: t.customer || '-',
         cust_26: t.cust_26 || '-',
+        impact: getImpactNames(t.cust_41),
         created: t.date_created ? new Date(t.date_created).toLocaleDateString('es-MX') : '-',
         updated: t.date_updated ? new Date(t.date_updated).toLocaleDateString('es-MX') : '-'
       };

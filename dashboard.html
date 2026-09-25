@@ -533,6 +533,10 @@
           <h3>Tickets por Instancia</h3>
           <canvas id="instanciaChart"></canvas>
         </div>
+        <div class="chart-container">
+          <h3>Tickets por Impacto</h3>
+          <canvas id="impactoChart"></canvas>
+        </div>
       </div>
     </div>
 
@@ -626,6 +630,7 @@
           loadChart('agenteChart', 'tickets-por-agente', params, 'Agente'),
           loadChart('categoriaChart', 'tickets-por-categoria', params, 'Categoría'),
           loadChart('instanciaChart', 'tickets-por-instancia', params, 'Instancia'),
+          loadChart('impactoChart', 'tickets-por-impacto', params, 'Impacto'),
           loadTickets(params)
         ]);
       } catch (error) {
@@ -719,6 +724,8 @@
                   filterTicketsByStatus(selectedLabel);
                 } else if (canvasId === 'categoriaChart') {
                   filterTicketsByCategory(selectedLabel);
+                } else if (canvasId === 'impactoChart') {
+                  filterTicketsByImpact(selectedLabel);
                 }
               }
             }
@@ -734,7 +741,7 @@
         const response = await fetch(`/api/tickets?${params}`);
         const tickets = await response.json();
 
-        let html = '<table><thead><tr><th>ID</th><th>Asunto</th><th>Estado</th><th>Prioridad</th><th>Agente</th><th>Cliente</th><th>Categoría</th><th>Instancia</th><th>Creado</th><th>Actualizado</th></tr></thead><tbody>';
+        let html = '<table><thead><tr><th>ID</th><th>Asunto</th><th>Estado</th><th>Prioridad</th><th>Agente</th><th>Cliente</th><th>Categoría</th><th>Instancia</th><th>Creado</th><th>Actualizado</th><th>Impacto</th></tr></thead><tbody>';
 
         tickets.forEach(t => {
           const statusClass = `status-${t.status.toLowerCase().replace(/\s+/g, '-')}`;
@@ -752,6 +759,7 @@
               <td>${t.cust_26}</td>
               <td>${t.created}</td>
               <td>${t.updated}</td>
+              <td>${t.impact}</td>
             </tr>
           `;
         });
@@ -899,6 +907,29 @@
       });
 
       updateFilterBadge(`Categoría: ${category}`, visibleCount);
+    }
+
+    function filterTicketsByImpact(impact) {
+      const table = document.querySelector('table tbody');
+      const rows = table.querySelectorAll('tr');
+      let visibleCount = 0;
+
+      const normalize = (txt) => txt.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+      const normalizedFilter = normalize(impact);
+
+      rows.forEach(row => {
+        const impactCell = row.cells[10]; // IMPACTO está en índice 10 (puede tener varios valores)
+        const values = impactCell.textContent.split(',').map(normalize);
+
+        if (values.includes(normalizedFilter)) {
+          row.style.display = '';
+          visibleCount++;
+        } else {
+          row.style.display = 'none';
+        }
+      });
+
+      updateFilterBadge(`Impacto: ${impact}`, visibleCount);
     }
 
     function updateFilterBadge(filterText, count) {
