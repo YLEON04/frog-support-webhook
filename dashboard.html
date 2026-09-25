@@ -20,7 +20,7 @@
     }
 
     .container {
-      max-width: 1920px;
+      max-width: 1400px;
       margin: 0 auto;
       background: white;
       border-radius: 12px;
@@ -709,37 +709,54 @@
       background: #764ba2;
     }
 
-    /* Layout en dos columnas: gráficas | tabla de tickets */
-    .split-layout {
-      display: grid;
-      grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
-      align-items: start;
-    }
-
-    .left-panel {
-      min-width: 0;
-    }
-
-    .left-panel > .aging-section,
-    .left-panel > .performance-section,
-    .left-panel > .analysis-section {
+    /* Pestañas de gráficas */
+    .tabs-bar {
+      display: flex;
+      gap: 6px;
       padding: 0 30px;
+      border-bottom: 2px solid #e0e0e0;
+      flex-wrap: wrap;
     }
 
-    .right-panel {
-      min-width: 0;
-      align-self: stretch;
-      background: #f8f9fa;
-      border-left: 1px solid #e0e0e0;
+    .tab-btn {
+      background: none;
+      border: none;
+      border-bottom: 3px solid transparent;
+      margin-bottom: -2px;
+      padding: 12px 18px;
+      font-size: 15px;
+      font-weight: 600;
+      color: #888;
+      cursor: pointer;
+      transition: color 0.2s, border-color 0.2s;
     }
 
-    /* La tabla se queda fija a la vista mientras recorres las gráficas */
-    .right-panel .tickets-section {
-      position: sticky;
-      top: 0;
-      max-height: 100vh;
-      overflow-y: auto;
-      padding: 20px;
+    .tab-btn:hover {
+      color: #667eea;
+    }
+
+    .tab-btn.active {
+      color: #667eea;
+      border-bottom-color: #667eea;
+    }
+
+    .tab-panel {
+      display: none;
+      padding: 25px 30px 10px;
+    }
+
+    .tab-panel.active {
+      display: block;
+    }
+
+    .tab-panel .charts-section {
+      padding: 0;
+    }
+
+    .tab-panel .aging-section,
+    .tab-panel .performance-section,
+    .tab-panel .analysis-section {
+      margin-bottom: 20px;
     }
 
     #ticketsContainer {
@@ -748,25 +765,6 @@
 
     td.ticket-id {
       white-space: nowrap;
-    }
-
-    /* Pantallas angostas: una sola columna como antes */
-    @media (max-width: 1300px) {
-      .split-layout {
-        grid-template-columns: 1fr;
-      }
-
-      .right-panel {
-        border-left: none;
-        border-top: 1px solid #e0e0e0;
-      }
-
-      .right-panel .tickets-section {
-        position: static;
-        max-height: none;
-        overflow-y: visible;
-        padding: 30px;
-      }
     }
 
     /* Paginación */
@@ -889,13 +887,18 @@
 
     <div class="error-alert" id="errorAlert"></div>
 
-    <div class="split-layout">
-    <div class="left-panel">
-
     <div class="kpis" id="kpisContainer">
       <div class="loading"><div class="spinner"></div>Cargando KPIs...</div>
     </div>
 
+    <div class="tabs-bar">
+      <button class="tab-btn active" data-tab="tab-rezago" onclick="showTab('tab-rezago')">⏰ Rezago</button>
+      <button class="tab-btn" data-tab="tab-rendimiento" onclick="showTab('tab-rendimiento')">🏆 Rendimiento</button>
+      <button class="tab-btn" data-tab="tab-tendencias" onclick="showTab('tab-tendencias')">📊 Tendencias</button>
+      <button class="tab-btn" data-tab="tab-distribuciones" onclick="showTab('tab-distribuciones')">📈 Distribuciones</button>
+    </div>
+
+    <div class="tab-panel active" id="tab-rezago">
     <div class="aging-section">
       <h2 class="section-title">⏰ Tickets con rezago (más de 3 días sin contar tiempo con cliente)</h2>
       <div id="agingSummary" class="aging-summary"></div>
@@ -906,6 +909,9 @@
       </div>
     </div>
 
+    </div>
+
+    <div class="tab-panel" id="tab-rendimiento">
     <div class="performance-section">
       <h2 class="section-title">🏆 Rendimiento por agente</h2>
       <div class="aging-chart-container">
@@ -916,6 +922,9 @@
       <div id="rendimientoTable" class="performance-table"></div>
     </div>
 
+    </div>
+
+    <div class="tab-panel" id="tab-tendencias">
     <div class="analysis-section">
       <h2 class="section-title">📊 Tendencias y análisis</h2>
 
@@ -938,6 +947,9 @@
       </div>
     </div>
 
+    </div>
+
+    <div class="tab-panel" id="tab-distribuciones">
     <div class="charts-section">
       <h2 class="section-title">📈 Distribuciones</h2>
       <div class="charts-grid">
@@ -964,9 +976,8 @@
       </div>
     </div>
 
-    </div><!-- /left-panel -->
+    </div>
 
-    <div class="right-panel">
     <div class="tickets-section">
       <h2 class="section-title">📋 Últimos Tickets (Haz clic para ver timeline)</h2>
       <div class="ticket-search">
@@ -979,8 +990,6 @@
         <div class="loading"><div class="spinner"></div>Cargando tickets...</div>
       </div>
     </div>
-    </div><!-- /right-panel -->
-    </div><!-- /split-layout -->
   </div>
 
   <!-- Modal Timeline -->
@@ -1829,6 +1838,17 @@
       }
 
       goToPage(1);
+    }
+
+    // ===== Pestañas =====
+    function showTab(tabId) {
+      document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === tabId));
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tabId));
+
+      // Las gráficas creadas en una pestaña oculta necesitan recalcular su tamaño
+      document.querySelectorAll(`#${tabId} canvas`).forEach(c => {
+        if (charts[c.id]) charts[c.id].resize();
+      });
     }
 
     // ===== Link a Support Candy =====
