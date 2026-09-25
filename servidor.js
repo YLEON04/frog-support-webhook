@@ -96,10 +96,23 @@ app.post('/webhook/support-candy', async (req, res) => {
     // GUARDAR EN HISTÓRICO
     if (changeData.previous && changeData.new) {
       const agentId = ticket.assigned_agent ? ticket.assigned_agent.toString().split('|')[0] : null;
+
+      // Hora del cambio: se usa date_updated de Support Candy si es reciente (máx. 10 min atrás).
+      // Así el retraso del webhook (Render dormido) no altera los tiempos.
+      // Si no es confiable, se usa la hora de llegada del webhook (NOW()).
+      let eventTime = null;
+      const updated = fixDate(ticket.date_updated);
+      if (updated) {
+        const diffMs = Date.now() - new Date(updated.toString().replace(' ', 'T') + 'Z').getTime();
+        if (!isNaN(diffMs) && diffMs >= -2 * 60 * 1000 && diffMs <= 10 * 60 * 1000) {
+          eventTime = updated;
+        }
+      }
+
       await pool.query(
-        `INSERT INTO ticket_state_history (ticket_id, previous_status, new_status, agent_id) 
-         VALUES ($1, $2, $3, $4)`,
-        [ticket.id, changeData.previous, changeData.new, agentId]
+        `INSERT INTO ticket_state_history (ticket_id, previous_status, new_status, agent_id, changed_at) 
+         VALUES ($1, $2, $3, $4, COALESCE($5, NOW()))`,
+        [ticket.id, changeData.previous, changeData.new, agentId, eventTime]
       );
     }
 
@@ -399,7 +412,8 @@ app.get('/api/ticket-timeline/:ticketId', async (req, res) => {
         a.agent_name,
         t.date_created,
         t.cust_26,
-        t.subject
+        t.subject,
+        t.assigned_agent
       FROM ticket_state_history tsh
       LEFT JOIN sc_statuses s_prev ON tsh.previous_status = s_prev.status_id
       LEFT JOIN sc_statuses s_new ON tsh.new_status = s_new.status_id
@@ -417,8 +431,19 @@ app.get('/api/ticket-timeline/:ticketId', async (req, res) => {
       });
     }
 
-    const firstRow = result.rows[0];
-    const timeline = [];
+    const rows = result.rows;
+    const firstRow = rows[0];
+
+    // Catálogo de agentes para resolver nombres
+    const agentsResult = await pool.query('SELECT agent_id, agent_name FROM sc_agents');
+    const agentMap = {};
+    agentsResult.rows.forEach(a => { agentMap[a.agent_id.toString()] = a.agent_name; });
+    const agentName = (id) => (id && agentMap[id.toString().trim()]) || null;
+
+    // Agente asignado actualmente al ticket
+    const currentAgentId = firstRow.assigned_agent
+      ? firstRow.assigned_agent.toString().split('|')[0]
+      : null;
 
     // Helper para convertir segundos a formato legible
     const formatDuration = (seconds) => {
@@ -434,50 +459,105 @@ app.get('/api/ticket-timeline/:ticketId', async (req, res) => {
       return result.trim();
     };
 
-    // Agregar estado inicial
-    const firstChangeTime = new Date(result.rows[0].changed_at);
+    // Clasificar cada estado en un grupo
+    const normalize = (txt) => (txt || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+    const getGroup = (statusName) => {
+      const n = normalize(statusName);
+      if (n === 'sin asignar') return 'espera';
+      if (n === 'cau') return 'cau';
+      if (n === 'con cliente') return 'cliente';
+      if (n === 'cerrado') return 'cerrado';
+      return 'otras'; // En validación, En programación, En consultoría, En ventas o negociación
+    };
+
+    const timeline = [];
     const createdTime = new Date(firstRow.date_created);
-    const initialDurationSeconds = Math.floor((firstChangeTime - createdTime) / 1000);
+    const now = new Date();
+
+    // Tramo inicial: desde la creación hasta el primer cambio de estado
+    const initialStatus = firstRow.prev_status_name || 'Sin asignar';
+    const initialGroup = getGroup(initialStatus);
+    const firstChangeTime = new Date(firstRow.changed_at);
+    const initialSeconds = Math.max(0, Math.floor((firstChangeTime - createdTime) / 1000));
 
     timeline.push({
-      status: 'Creado',
+      status: initialGroup === 'espera' ? 'En espera (sin asignar)' : initialStatus,
+      group: initialGroup,
       startTime: createdTime,
       endTime: firstChangeTime,
-      agent: 'Sistema',
-      durationSeconds: initialDurationSeconds,
-      durationFormatted: formatDuration(initialDurationSeconds)
+      agent: initialGroup === 'espera' ? 'Sin asignar' : (agentName(firstRow.agent_id) || 'Sin asignar'),
+      inProgress: false,
+      durationSeconds: initialSeconds,
+      durationFormatted: formatDuration(initialSeconds)
     });
 
-    // Procesar cambios de estado
-    for (let i = 0; i < result.rows.length; i++) {
-      const row = result.rows[i];
-      const nextRow = result.rows[i + 1];
+    // Tramos por cada cambio de estado
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const nextRow = rows[i + 1];
+      const statusName = row.new_status_name || `Estado ${row.new_status}`;
+      const group = getGroup(statusName);
+      const isLast = !nextRow;
       const startTime = new Date(row.changed_at);
-      const endTime = nextRow ? new Date(nextRow.changed_at) : new Date();
-      const durationSeconds = Math.floor((endTime - startTime) / 1000);
+
+      // Cerrado es el final: no acumula tiempo
+      const endTime = nextRow ? new Date(nextRow.changed_at) : (group === 'cerrado' ? startTime : now);
+      const durationSeconds = Math.max(0, Math.floor((endTime - startTime) / 1000));
+
+      // Agente del tramo: el que quedó asignado durante ese estado
+      // (se registra en el siguiente cambio; si es el estado actual, el asignado hoy)
+      let agent;
+      if (group === 'espera') {
+        agent = 'Sin asignar';
+      } else {
+        const agentId = nextRow ? nextRow.agent_id : (currentAgentId || row.agent_id);
+        agent = agentName(agentId) || row.agent_name || 'Sin asignar';
+      }
 
       timeline.push({
-        status: row.new_status_name || `Estado ${row.new_status}`,
-        startTime: startTime,
-        endTime: endTime,
-        agent: row.agent_name || 'Sin asignar',
-        durationSeconds: durationSeconds,
-        durationFormatted: formatDuration(durationSeconds)
+        status: group === 'espera' ? 'En espera (sin asignar)' : statusName,
+        group,
+        startTime,
+        endTime,
+        agent,
+        inProgress: isLast && group !== 'cerrado',
+        durationSeconds,
+        durationFormatted: group === 'cerrado' ? '-' : formatDuration(durationSeconds)
       });
     }
 
-    const totalDurationSeconds = Math.floor((timeline[timeline.length - 1].endTime - createdTime) / 1000);
+    // Resumen por grupo
+    const summarySeconds = { espera: 0, cau: 0, otras: 0, cliente: 0 };
+    timeline.forEach(item => {
+      if (summarySeconds[item.group] !== undefined) {
+        summarySeconds[item.group] += item.durationSeconds;
+      }
+    });
+
+    const summary = {};
+    Object.keys(summarySeconds).forEach(k => {
+      summary[k] = {
+        seconds: summarySeconds[k],
+        formatted: formatDuration(summarySeconds[k])
+      };
+    });
+
+    const lastItem = timeline[timeline.length - 1];
+    const totalDurationSeconds = Math.max(0, Math.floor((lastItem.endTime - createdTime) / 1000));
 
     res.json({
       ticketId,
       subject: firstRow.subject,
       instance: firstRow.cust_26,
+      isOpen: lastItem.group !== 'cerrado',
       totalDurationSeconds: totalDurationSeconds,
       totalDurationFormatted: formatDuration(totalDurationSeconds),
+      summary,
       timeline
     });
 
   } catch (error) {
+    console.error('Error en /api/ticket-timeline:', error.message);
     res.status(500).json({ error: error.message });
   }
 });
