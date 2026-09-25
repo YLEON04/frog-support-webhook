@@ -579,6 +579,74 @@
       text-align: center;
     }
 
+    /* Paginación */
+    .pagination {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 12px;
+      padding: 15px 0;
+    }
+
+    .pagination-info {
+      font-size: 13px;
+      color: #666;
+    }
+
+    .pagination-controls {
+      display: flex;
+      gap: 5px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .page-btn {
+      padding: 6px 12px;
+      border: 1px solid #ddd;
+      background: white;
+      color: #667eea;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 600;
+      transition: all 0.2s;
+    }
+
+    .page-btn:hover:not(:disabled) {
+      background: #f0f2ff;
+      border-color: #667eea;
+    }
+
+    .page-btn.active {
+      background: #667eea;
+      color: white;
+      border-color: #667eea;
+    }
+
+    .page-btn:disabled {
+      color: #ccc;
+      cursor: not-allowed;
+    }
+
+    .page-ellipsis {
+      padding: 0 5px;
+      color: #999;
+    }
+
+    .page-size {
+      font-size: 13px;
+      color: #666;
+    }
+
+    .page-size select {
+      margin-left: 5px;
+      padding: 5px 8px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      font-size: 13px;
+    }
+
     /* Filter Badge */
     #filterBadge {
       background: #667eea;
@@ -973,7 +1041,7 @@
           const priorityClass = `priority-${t.priority.toLowerCase()}`;
 
           html += `
-            <tr onclick="openTimeline(${t.id})">
+            <tr data-match="1" onclick="openTimeline(${t.id})">
               <td class="ticket-id">#${t.id}</td>
               <td>${t.subject}</td>
               <td><span class="status-badge ${statusClass}">${t.status}</span></td>
@@ -990,7 +1058,9 @@
         });
 
         html += '</tbody></table>';
+        html += '<div id="pagination" class="pagination"></div>';
         document.getElementById('ticketsContainer').innerHTML = html || '<p style="text-align: center; padding: 20px;">No hay tickets</p>';
+        goToPage(1);
       } catch (error) {
         console.error('Error cargando tickets:', error);
       }
@@ -1097,10 +1167,10 @@
         const cellText = instanceCell.textContent.trim().toLowerCase();
         
         if (cellText === normalizedFilter) {
-          row.style.display = '';
+          row.dataset.match = '1';
           visibleCount++;
         } else {
-          row.style.display = 'none';
+          row.dataset.match = '0';
         }
       });
 
@@ -1120,10 +1190,10 @@
         const normalizedCell = cellText.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
         
         if (normalizedCell === normalizedFilter) {
-          row.style.display = '';
+          row.dataset.match = '1';
           visibleCount++;
         } else {
-          row.style.display = 'none';
+          row.dataset.match = '0';
         }
       });
 
@@ -1139,10 +1209,10 @@
         const statusCell = row.cells[2]; // ESTADO está en índice 2
         const statusText = statusCell.textContent.trim().toUpperCase();
         if (statusText.includes(status.toUpperCase())) {
-          row.style.display = '';
+          row.dataset.match = '1';
           visibleCount++;
         } else {
-          row.style.display = 'none';
+          row.dataset.match = '0';
         }
       });
 
@@ -1161,10 +1231,10 @@
         const cellText = categoryCell.textContent.trim().toLowerCase();
         
         if (cellText === normalizedFilter) {
-          row.style.display = '';
+          row.dataset.match = '1';
           visibleCount++;
         } else {
-          row.style.display = 'none';
+          row.dataset.match = '0';
         }
       });
 
@@ -1184,10 +1254,10 @@
         const values = impactCell.textContent.split(',').map(normalize);
 
         if (values.includes(normalizedFilter)) {
-          row.style.display = '';
+          row.dataset.match = '1';
           visibleCount++;
         } else {
-          row.style.display = 'none';
+          row.dataset.match = '0';
         }
       });
 
@@ -1199,13 +1269,15 @@
       if (!badge) {
         badge = document.createElement('div');
         badge.id = 'filterBadge';
-        document.querySelector('.tickets-section').insertBefore(badge, document.querySelector('table'));
+        document.querySelector('.tickets-section').insertBefore(badge, document.getElementById('ticketsContainer'));
       }
 
       badge.innerHTML = `
         <span>${filterText} (${count} tickets)</span>
         <button onclick="clearFilter()">✕ Limpiar</button>
       `;
+
+      goToPage(1);
     }
 
     function clearFilter() {
@@ -1213,13 +1285,88 @@
       const rows = table.querySelectorAll('tr');
       
       rows.forEach(row => {
-        row.style.display = '';
+        row.dataset.match = '1';
       });
 
       const badge = document.getElementById('filterBadge');
       if (badge) {
         badge.remove();
       }
+
+      goToPage(1);
+    }
+
+    // ===== Paginación de la tabla =====
+    let currentPage = 1;
+    let pageSize = 25;
+
+    function getMatchingRows() {
+      const tbody = document.querySelector('#ticketsContainer table tbody');
+      if (!tbody) return [];
+      return Array.from(tbody.querySelectorAll('tr')).filter(r => r.dataset.match !== '0');
+    }
+
+    function goToPage(page) {
+      const tbody = document.querySelector('#ticketsContainer table tbody');
+      if (!tbody) return;
+
+      const allRows = Array.from(tbody.querySelectorAll('tr'));
+      const rows = getMatchingRows();
+      const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
+      currentPage = Math.min(Math.max(1, page), totalPages);
+
+      const start = (currentPage - 1) * pageSize;
+      const end = start + pageSize;
+
+      allRows.forEach(r => { r.style.display = 'none'; });
+      rows.slice(start, end).forEach(r => { r.style.display = ''; });
+
+      renderPagination(rows.length, totalPages, start, Math.min(end, rows.length));
+    }
+
+    function changePageSize(size) {
+      pageSize = parseInt(size);
+      goToPage(1);
+    }
+
+    function renderPagination(total, totalPages, start, end) {
+      const container = document.getElementById('pagination');
+      if (!container) return;
+
+      if (total === 0) {
+        container.innerHTML = '<span class="pagination-info">No hay tickets que coincidan</span>';
+        return;
+      }
+
+      // Números visibles: primera, última y 2 alrededor de la actual
+      const pages = [];
+      for (let p = 1; p <= totalPages; p++) {
+        if (p === 1 || p === totalPages || Math.abs(p - currentPage) <= 2) {
+          pages.push(p);
+        } else if (pages[pages.length - 1] !== '...') {
+          pages.push('...');
+        }
+      }
+
+      const pageButtons = pages.map(p => p === '...'
+        ? '<span class="page-ellipsis">…</span>'
+        : `<button class="page-btn ${p === currentPage ? 'active' : ''}" onclick="goToPage(${p})">${p}</button>`
+      ).join('');
+
+      container.innerHTML = `
+        <span class="pagination-info">Mostrando ${start + 1}–${end} de ${total} tickets</span>
+        <div class="pagination-controls">
+          <button class="page-btn" onclick="goToPage(${currentPage - 1})" ${currentPage === 1 ? 'disabled' : ''}>‹ Anterior</button>
+          ${pageButtons}
+          <button class="page-btn" onclick="goToPage(${currentPage + 1})" ${currentPage === totalPages ? 'disabled' : ''}>Siguiente ›</button>
+        </div>
+        <label class="page-size">
+          Por página:
+          <select onchange="changePageSize(this.value)">
+            ${[10, 25, 50, 100].map(n => `<option value="${n}" ${n === pageSize ? 'selected' : ''}>${n}</option>`).join('')}
+          </select>
+        </label>
+      `;
     }
 
     function showError(message) {
