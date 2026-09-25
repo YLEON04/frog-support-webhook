@@ -311,8 +311,7 @@ app.get('/api/tickets-por-impacto', async (req, res) => {
 
 // API: Tickets abiertos con rezago (más de 3 días SIN contar el tiempo "Con cliente")
 // No usa el filtro de fechas: siempre muestra lo que sigue abierto hoy
-app.get('/api/tickets-rezagados', async (req, res) => {
-  try {
+async function calcularRezagados() {
     // 1. Tickets abiertos del CAU con más de 3 días de antigüedad total
     //    (si el total no llega a 3 días, descontando al cliente tampoco llegará)
     const result = await pool.query(`
@@ -403,6 +402,13 @@ app.get('/api/tickets-rezagados', async (req, res) => {
     .filter(t => t.dias > 3)
     .sort((a, b) => b.dias - a.dias);
 
+    return tickets;
+}
+
+app.get('/api/tickets-rezagados', async (req, res) => {
+  try {
+    const tickets = await calcularRezagados();
+
     res.json({
       total: tickets.length,
       alerta: tickets.filter(t => t.nivel === 'alerta').length,   // 3 a 7 días
@@ -412,6 +418,118 @@ app.get('/api/tickets-rezagados', async (req, res) => {
 
   } catch (error) {
     console.error('Error en /api/tickets-rezagados:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Rendimiento por agente (usa el filtro de fechas)
+app.get('/api/rendimiento-agentes', async (req, res) => {
+  try {
+    const { startDate, endDate } = req.query;
+    const dateFilter = getDateFilter(startDate, endDate);
+    const CAU_AGENTS = ['22', '23', '17', '5', '3'];
+
+    const agentsResult = await pool.query(
+      'SELECT agent_id, agent_name FROM sc_agents WHERE agent_id IN (22, 23, 17, 5, 3)'
+    );
+
+    // Base por agente
+    const stats = {};
+    agentsResult.rows.forEach(a => {
+      stats[a.agent_id.toString()] = {
+        agentId: a.agent_id,
+        agent: a.agent_name,
+        asignados: 0,
+        cerrados: 0,
+        abiertos: 0,
+        reaccionSegundos: [],
+        rezagados: 0
+      };
+    });
+
+    // 1. Tickets del periodo (asignados, cerrados, abiertos)
+    const ticketsResult = await pool.query(`
+      SELECT DISTINCT ON (t.ticket_id) t.ticket_id, t.status, t.assigned_agent
+      FROM support_candy_tickets t
+      WHERE t.assigned_agent IS NOT NULL ${dateFilter}
+      ORDER BY t.ticket_id, t.date_updated DESC
+    `);
+
+    const currentAgentByTicket = {};
+    ticketsResult.rows.forEach(t => {
+      const ids = t.assigned_agent.toString().split('|').map(v => v.trim());
+      currentAgentByTicket[t.ticket_id] = ids[0];
+      ids.filter(id => CAU_AGENTS.includes(id) && stats[id]).forEach(id => {
+        const st = parseInt(t.status);
+        if (st === 6) return; // spam no cuenta
+        stats[id].asignados++;
+        if (st === 5) stats[id].cerrados++;
+        else stats[id].abiertos++;
+      });
+    });
+
+    // 2. Tiempo de reacción: cuánto dura cada tramo en CAU antes de que el agente lo mueva
+    const ticketIds = ticketsResult.rows.map(t => t.ticket_id);
+    if (ticketIds.length > 0) {
+      const hist = await pool.query(`
+        SELECT tsh.ticket_id, tsh.agent_id, tsh.changed_at, s_new.status_name_es AS new_name
+        FROM ticket_state_history tsh
+        LEFT JOIN sc_statuses s_new ON tsh.new_status = s_new.status_id
+        WHERE tsh.ticket_id = ANY($1)
+        ORDER BY tsh.ticket_id, tsh.changed_at ASC
+      `, [ticketIds]);
+
+      const byTicket = {};
+      hist.rows.forEach(h => {
+        if (!byTicket[h.ticket_id]) byTicket[h.ticket_id] = [];
+        byTicket[h.ticket_id].push(h);
+      });
+
+      const normalize = (txt) => (txt || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+
+      Object.keys(byTicket).forEach(ticketId => {
+        const rows = byTicket[ticketId];
+        rows.forEach((row, i) => {
+          const next = rows[i + 1];
+          // Solo tramos en CAU ya terminados (el agente ya lo movió)
+          if (normalize(row.new_name) !== 'cau' || !next) return;
+          const agentId = (next.agent_id || currentAgentByTicket[ticketId] || '').toString().trim();
+          if (!stats[agentId]) return;
+          const seconds = (new Date(next.changed_at) - new Date(row.changed_at)) / 1000;
+          if (seconds >= 0) stats[agentId].reaccionSegundos.push(seconds);
+        });
+      });
+    }
+
+    // 3. Rezagados actuales (misma lógica que la gráfica de rezago)
+    const rezagados = await calcularRezagados();
+    const nameToId = {};
+    Object.values(stats).forEach(s => { nameToId[s.agent] = s.agentId.toString(); });
+    rezagados.forEach(t => {
+      const id = nameToId[t.agent];
+      if (id && stats[id]) stats[id].rezagados++;
+    });
+
+    // 4. Resultado
+    const agentes = Object.values(stats).map(s => {
+      const n = s.reaccionSegundos.length;
+      const promedio = n ? s.reaccionSegundos.reduce((a, b) => a + b, 0) / n : null;
+      return {
+        agent: s.agent,
+        asignados: s.asignados,
+        cerrados: s.cerrados,
+        abiertos: s.abiertos,
+        tasaCierre: s.asignados ? Math.round((s.cerrados / s.asignados) * 100) : 0,
+        reaccionHoras: promedio !== null ? Math.round((promedio / 3600) * 10) / 10 : null,
+        tramosMedidos: n,
+        rezagados: s.rezagados
+      };
+    }).sort((a, b) => b.cerrados - a.cerrados);
+
+    res.json({ agentes });
+
+  } catch (error) {
+    console.error('Error en /api/rendimiento-agentes:', error.message);
     res.status(500).json({ error: error.message });
   }
 });

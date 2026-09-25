@@ -579,6 +579,40 @@
       text-align: center;
     }
 
+    /* Rendimiento por agente */
+    .performance-section {
+      margin-bottom: 40px;
+    }
+
+    .performance-table {
+      margin-top: 15px;
+      overflow-x: auto;
+    }
+
+    .performance-table table td,
+    .performance-table table th {
+      text-align: center;
+    }
+
+    .performance-table table td:first-child,
+    .performance-table table th:first-child {
+      text-align: left;
+    }
+
+    .performance-table tr {
+      cursor: default;
+    }
+
+    .perf-good { color: #2e7d32; font-weight: 600; }
+    .perf-warn { color: #e67e22; font-weight: 600; }
+    .perf-bad  { color: #e53935; font-weight: 600; }
+
+    .perf-note {
+      font-size: 12px;
+      color: #888;
+      margin-top: 8px;
+    }
+
     /* Paginación */
     .pagination {
       display: flex;
@@ -713,6 +747,16 @@
       </div>
     </div>
 
+    <div class="performance-section">
+      <h2 class="section-title">🏆 Rendimiento por agente</h2>
+      <div class="aging-chart-container">
+        <div style="position: relative; height: 320px;">
+          <canvas id="rendimientoChart"></canvas>
+        </div>
+      </div>
+      <div id="rendimientoTable" class="performance-table"></div>
+    </div>
+
     <div class="charts-section">
       <h2 class="section-title">📈 Distribuciones</h2>
       <div class="charts-grid">
@@ -831,6 +875,7 @@
           loadChart('instanciaChart', 'tickets-por-instancia', params, 'Instancia'),
           loadChart('impactoChart', 'tickets-por-impacto', params, 'Impacto'),
           loadAgingChart(),
+          loadPerformance(params),
           loadTickets(params)
         ]);
       } catch (error) {
@@ -1029,6 +1074,132 @@
       }
     }
 
+    async function loadPerformance(params) {
+      try {
+        const response = await fetch(`/api/rendimiento-agentes?${params}`);
+        const data = await response.json();
+        const agentes = data.agentes || [];
+
+        if (charts['rendimientoChart']) {
+          charts['rendimientoChart'].destroy();
+        }
+
+        const ctx = document.getElementById('rendimientoChart').getContext('2d');
+        charts['rendimientoChart'] = new Chart(ctx, {
+          data: {
+            labels: agentes.map(a => a.agent),
+            datasets: [
+              {
+                type: 'bar',
+                label: 'Cerrados',
+                data: agentes.map(a => a.cerrados),
+                backgroundColor: '#43a047',
+                borderRadius: 6,
+                yAxisID: 'y'
+              },
+              {
+                type: 'bar',
+                label: 'Abiertos',
+                data: agentes.map(a => a.abiertos),
+                backgroundColor: '#667eea',
+                borderRadius: 6,
+                yAxisID: 'y'
+              },
+              {
+                type: 'bar',
+                label: 'Con rezago',
+                data: agentes.map(a => a.rezagados),
+                backgroundColor: '#e53935',
+                borderRadius: 6,
+                yAxisID: 'y'
+              },
+              {
+                type: 'line',
+                label: 'Reacción promedio en CAU (horas)',
+                data: agentes.map(a => a.reaccionHoras),
+                borderColor: '#f0ad4e',
+                backgroundColor: '#f0ad4e',
+                borderWidth: 3,
+                pointRadius: 6,
+                tension: 0.3,
+                spanGaps: true,
+                yAxisID: 'y1'
+              }
+            ]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { position: 'top' },
+              tooltip: {
+                callbacks: {
+                  afterBody: (items) => {
+                    const a = agentes[items[0].dataIndex];
+                    return [
+                      '',
+                      `📋 Asignados: ${a.asignados}`,
+                      `✅ Tasa de cierre: ${a.tasaCierre}%`,
+                      `📏 Tramos CAU medidos: ${a.tramosMedidos}`
+                    ];
+                  }
+                }
+              }
+            },
+            scales: {
+              y: {
+                beginAtZero: true,
+                ticks: { stepSize: 1 },
+                title: { display: true, text: 'Tickets' }
+              },
+              y1: {
+                beginAtZero: true,
+                position: 'right',
+                grid: { drawOnChartArea: false },
+                title: { display: true, text: 'Horas de reacción' }
+              }
+            },
+            onClick: (event, elements) => {
+              if (elements.length > 0) {
+                filterTicketsByAgent(agentes[elements[0].index].agent);
+              }
+            }
+          }
+        });
+
+        // Tabla resumen
+        const reaccionClass = (h) => h === null ? '' : (h <= 4 ? 'perf-good' : (h <= 24 ? 'perf-warn' : 'perf-bad'));
+        const cierreClass = (p) => p >= 70 ? 'perf-good' : (p >= 40 ? 'perf-warn' : 'perf-bad');
+        const formatHoras = (h) => {
+          if (h === null) return '-';
+          if (h < 1) return `${Math.round(h * 60)} min`;
+          return `${h} h`;
+        };
+
+        let html = '<table><thead><tr><th>Agente</th><th>Asignados</th><th>Cerrados</th><th>Abiertos</th><th>Tasa de cierre</th><th>Reacción promedio</th><th>Con rezago</th></tr></thead><tbody>';
+        agentes.forEach(a => {
+          html += `
+            <tr>
+              <td><strong>${a.agent}</strong></td>
+              <td>${a.asignados}</td>
+              <td>${a.cerrados}</td>
+              <td>${a.abiertos}</td>
+              <td class="${cierreClass(a.tasaCierre)}">${a.tasaCierre}%</td>
+              <td class="${reaccionClass(a.reaccionHoras)}">${formatHoras(a.reaccionHoras)}</td>
+              <td class="${a.rezagados > 0 ? 'perf-bad' : 'perf-good'}">${a.rezagados}</td>
+            </tr>
+          `;
+        });
+        html += '</tbody></table>';
+        html += '<p class="perf-note">Reacción promedio: tiempo que el ticket pasa en CAU antes de que el agente lo mueva de estado (🟢 ≤ 4 h · 🟠 ≤ 24 h · 🔴 más de 24 h). Con rezago: tickets actuales con más de 3 días de atención, sin importar el filtro de fechas. Clic en una barra para filtrar la tabla de tickets.</p>';
+
+        document.getElementById('rendimientoTable').innerHTML = html;
+
+      } catch (error) {
+        console.error('Error cargando rendimiento:', error);
+      }
+    }
+
     async function loadTickets(params) {
       try {
         const response = await fetch(`/api/tickets?${params}`);
@@ -1156,7 +1327,7 @@
 
     // Funciones de filtro
     function filterTicketsByInstance(instance) {
-      const table = document.querySelector('table tbody');
+      const table = document.querySelector('#ticketsContainer table tbody');
       const rows = table.querySelectorAll('tr');
       let visibleCount = 0;
 
@@ -1178,7 +1349,7 @@
     }
 
     function filterTicketsByAgent(agent) {
-      const table = document.querySelector('table tbody');
+      const table = document.querySelector('#ticketsContainer table tbody');
       const rows = table.querySelectorAll('tr');
       let visibleCount = 0;
 
@@ -1201,7 +1372,7 @@
     }
 
     function filterTicketsByStatus(status) {
-      const table = document.querySelector('table tbody');
+      const table = document.querySelector('#ticketsContainer table tbody');
       const rows = table.querySelectorAll('tr');
       let visibleCount = 0;
 
@@ -1220,7 +1391,7 @@
     }
 
     function filterTicketsByCategory(category) {
-      const table = document.querySelector('table tbody');
+      const table = document.querySelector('#ticketsContainer table tbody');
       const rows = table.querySelectorAll('tr');
       let visibleCount = 0;
 
@@ -1242,7 +1413,7 @@
     }
 
     function filterTicketsByImpact(impact) {
-      const table = document.querySelector('table tbody');
+      const table = document.querySelector('#ticketsContainer table tbody');
       const rows = table.querySelectorAll('tr');
       let visibleCount = 0;
 
@@ -1281,7 +1452,7 @@
     }
 
     function clearFilter() {
-      const table = document.querySelector('table tbody');
+      const table = document.querySelector('#ticketsContainer table tbody');
       const rows = table.querySelectorAll('tr');
       
       rows.forEach(row => {
