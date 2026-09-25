@@ -635,6 +635,80 @@
       margin-left: 8px;
     }
 
+    /* Buscador de tickets */
+    .ticket-search {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 15px;
+      flex-wrap: wrap;
+    }
+
+    .ticket-search input {
+      padding: 10px 14px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      font-size: 14px;
+      width: 320px;
+      max-width: 100%;
+    }
+
+    .ticket-search input:focus {
+      outline: none;
+      border-color: #667eea;
+      box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.15);
+    }
+
+    .ticket-search button {
+      background: #eee;
+      border: none;
+      border-radius: 6px;
+      padding: 9px 12px;
+      cursor: pointer;
+      font-weight: bold;
+      color: #666;
+    }
+
+    .ticket-search-hint {
+      font-size: 12px;
+      color: #888;
+    }
+
+    .ticket-search-hint a {
+      color: #667eea;
+      font-weight: 600;
+      cursor: pointer;
+      text-decoration: underline;
+    }
+
+    /* Links a Support Candy */
+    .sc-link {
+      color: #667eea;
+      text-decoration: none;
+      font-weight: bold;
+    }
+
+    .sc-link:hover {
+      text-decoration: underline;
+    }
+
+    .sc-button {
+      display: inline-block;
+      margin: 5px 0 8px;
+      padding: 6px 12px;
+      background: #667eea;
+      color: white;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 600;
+      text-decoration: none;
+      transition: background 0.2s;
+    }
+
+    .sc-button:hover {
+      background: #764ba2;
+    }
+
     /* Paginación */
     .pagination {
       display: flex;
@@ -829,6 +903,12 @@
 
     <div class="tickets-section">
       <h2 class="section-title">📋 Últimos Tickets (Haz clic para ver timeline)</h2>
+      <div class="ticket-search">
+        <input type="text" id="ticketSearch" placeholder="🔍 Buscar por ID de ticket (ej. 2808)"
+               inputmode="numeric" oninput="applyTicketSearch()" onkeydown="if (event.key === 'Enter') searchEnter()">
+        <button id="ticketSearchClear" onclick="clearTicketSearch()" style="display: none;">✕</button>
+        <span id="ticketSearchHint" class="ticket-search-hint"></span>
+      </div>
       <div id="ticketsContainer">
         <div class="loading"><div class="spinner"></div>Cargando tickets...</div>
       </div>
@@ -841,6 +921,7 @@
       <span class="close" onclick="closeTimeline()">&times;</span>
       <div class="modal-title">
         <h2 id="modalTicketId">Ticket #2806</h2>
+        <a id="modalScLink" class="sc-button" href="#" target="_blank" rel="noopener">Abrir en Support Candy ↗</a>
         <p class="ticket-meta" id="modalTicketMeta"></p>
       </div>
       <div id="timelineContent">
@@ -1421,8 +1502,8 @@
           const priorityClass = `priority-${t.priority.toLowerCase()}`;
 
           html += `
-            <tr data-match="1" onclick="openTimeline(${t.id})">
-              <td class="ticket-id">#${t.id}</td>
+            <tr data-match="1" data-id="${t.id}" onclick="openTimeline(${t.id})">
+              <td class="ticket-id"><a class="sc-link" href="${scTicketLink(t.id)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="Abrir en Support Candy">#${t.id} ↗</a></td>
               <td>${t.subject}</td>
               <td><span class="status-badge ${statusClass}">${t.status}</span></td>
               <td><span class="${priorityClass}">${t.priority}</span></td>
@@ -1440,7 +1521,7 @@
         html += '</tbody></table>';
         html += '<div id="pagination" class="pagination"></div>';
         document.getElementById('ticketsContainer').innerHTML = html || '<p style="text-align: center; padding: 20px;">No hay tickets</p>';
-        goToPage(1);
+        applyTicketSearch();
       } catch (error) {
         console.error('Error cargando tickets:', error);
       }
@@ -1449,12 +1530,14 @@
     async function openTimeline(ticketId) {
       const modal = document.getElementById('timelineModal');
       modal.style.display = 'block';
+      document.getElementById('modalScLink').href = scTicketLink(ticketId);
 
       try {
         const response = await fetch(`/api/ticket-timeline/${ticketId}`);
         const data = await response.json();
 
         document.getElementById('modalTicketId').textContent = `Ticket #${data.ticketId}`;
+        document.getElementById('modalScLink').href = scTicketLink(data.ticketId);
         const estado = data.isOpen ? 'Abierto' : 'Cerrado';
         document.getElementById('modalTicketMeta').textContent = `${data.subject} • Instancia: ${data.instance} • ${estado}`;
 
@@ -1676,6 +1759,58 @@
       goToPage(1);
     }
 
+    // ===== Link a Support Candy =====
+    const SC_TICKET_URL = 'https://www.frog.com.mx/wp-admin/admin.php?page=wpsc-tickets&section=ticket-list&id=';
+    const scTicketLink = (id) => `${SC_TICKET_URL}${encodeURIComponent(id)}`;
+
+    // ===== Buscador por ID =====
+    function applyTicketSearch() {
+      const input = document.getElementById('ticketSearch');
+      const hint = document.getElementById('ticketSearchHint');
+      const clearBtn = document.getElementById('ticketSearchClear');
+      const query = input.value.replace(/[^0-9]/g, '');
+
+      clearBtn.style.display = input.value ? '' : 'none';
+
+      const tbody = document.querySelector('#ticketsContainer table tbody');
+      if (!tbody) return;
+      const rows = Array.from(tbody.querySelectorAll('tr'));
+
+      rows.forEach(r => {
+        r.dataset.search = (!query || r.dataset.id.includes(query)) ? '1' : '0';
+      });
+
+      if (!query) {
+        hint.innerHTML = '';
+      } else {
+        const found = rows.filter(r => r.dataset.search === '1').length;
+        const exact = rows.some(r => r.dataset.id === query);
+        if (found === 0 || !exact) {
+          // Puede ser un ticket fuera de los últimos cargados: abrir su timeline directo
+          hint.innerHTML = `${found ? found + ' coincidencias · ' : 'No está en la tabla · '}<a onclick="openTimeline(${query})">Ver timeline del #${query}</a>`;
+        } else {
+          hint.innerHTML = `${found} coincidencia${found === 1 ? '' : 's'}`;
+        }
+      }
+
+      goToPage(1);
+    }
+
+    function searchEnter() {
+      const query = document.getElementById('ticketSearch').value.replace(/[^0-9]/g, '');
+      if (!query) return;
+      const exactRow = document.querySelector(`#ticketsContainer tbody tr[data-id="${query}"]`);
+      // Enter con un ID exacto abre su timeline, esté o no en la tabla
+      if (exactRow || query.length >= 3) {
+        openTimeline(parseInt(query));
+      }
+    }
+
+    function clearTicketSearch() {
+      document.getElementById('ticketSearch').value = '';
+      applyTicketSearch();
+    }
+
     // ===== Paginación de la tabla =====
     let currentPage = 1;
     let pageSize = 25;
@@ -1683,7 +1818,8 @@
     function getMatchingRows() {
       const tbody = document.querySelector('#ticketsContainer table tbody');
       if (!tbody) return [];
-      return Array.from(tbody.querySelectorAll('tr')).filter(r => r.dataset.match !== '0');
+      return Array.from(tbody.querySelectorAll('tr'))
+        .filter(r => r.dataset.match !== '0' && r.dataset.search !== '0');
     }
 
     function goToPage(page) {
