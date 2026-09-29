@@ -1231,6 +1231,16 @@
       }
     }
 
+    // 478.4 horas → "19d 22h"
+    function formatDiasHoras(horas) {
+      const h = parseFloat(horas) || 0;
+      if (h < 1) return `${Math.round(h * 60)} min`;
+      if (h < 24) return `${Math.round(h * 10) / 10} h`;
+      const dias = Math.floor(h / 24);
+      const resto = Math.round(h % 24);
+      return resto ? `${dias}d ${resto}h` : `${dias}d`;
+    }
+
     async function loadKPIs(params) {
       try {
         const response = await fetch(`/api/kpis?${params}`);
@@ -1254,8 +1264,8 @@
             <div class="kpi-value">${data.total_tickets}</div>
           </div>
           <div class="kpi-card">
-            <div class="kpi-label">Promedio (horas)</div>
-            <div class="kpi-value">${data.tiempo_promedio_horas}</div>
+            <div class="kpi-label">Tiempo promedio</div>
+            <div class="kpi-value">${formatDiasHoras(data.tiempo_promedio_horas)}</div>
           </div>
         `;
       } catch (error) {
