@@ -15,6 +15,32 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false }
 });
 
+// ===== Estados especiales por NOMBRE (no por ID fijo) =====
+// Los IDs de estatus dependen de cada instalación de Support Candy; aquí se buscan por nombre en sc_statuses
+const SQL_CERRADO_IDS = `(SELECT status_id FROM sc_statuses WHERE lower(trim(status_name_es)) = 'cerrado')`;
+const SQL_SPAM_IDS = `(SELECT status_id FROM sc_statuses WHERE lower(trim(status_name_es)) = 'spam')`;
+// Otras áreas: todo lo que no es Sin asignar, Con cliente, CAU, Cerrado ni Spam
+// (En validación, En programación, En consultoría, En ventas o negociación)
+const SQL_OTRAS_AREAS_IDS = `(SELECT status_id FROM sc_statuses
+  WHERE lower(trim(status_name_es)) NOT IN ('sin asignar', 'con cliente', 'cau', 'cerrado', 'spam'))`;
+
+let estadosCache = null;
+let estadosCacheAt = 0;
+const getEstadosEspeciales = async () => {
+  if (estadosCache && Date.now() - estadosCacheAt < 5 * 60 * 1000) return estadosCache;
+  const r = await pool.query('SELECT status_id, status_name_es FROM sc_statuses');
+  const cerrado = new Set();
+  const spam = new Set();
+  r.rows.forEach(row => {
+    const n = (row.status_name_es || '').toLowerCase().trim();
+    if (n === 'cerrado') cerrado.add(String(row.status_id));
+    if (n === 'spam') spam.add(String(row.status_id));
+  });
+  estadosCache = { cerrado, spam };
+  estadosCacheAt = Date.now();
+  return estadosCache;
+};
+
 // Helper para convertir fechas inválidas a null
 const fixDate = (dateStr) => {
   if (!dateStr || dateStr.includes('0000-00-00')) {
@@ -177,9 +203,9 @@ app.get('/api/kpis', async (req, res) => {
 
     const result = await pool.query(`
       SELECT
-        COUNT(*) FILTER (WHERE status IN (1,2,3,4)) as tickets_abiertos,
-        COUNT(*) FILTER (WHERE status = 5) as tickets_cerrados,
-        COUNT(*) FILTER (WHERE status = 6) as tickets_spam,
+        COUNT(*) FILTER (WHERE status NOT IN ${SQL_CERRADO_IDS} AND status NOT IN ${SQL_SPAM_IDS}) as tickets_abiertos,
+        COUNT(*) FILTER (WHERE status IN ${SQL_CERRADO_IDS}) as tickets_cerrados,
+        COUNT(*) FILTER (WHERE status IN ${SQL_OTRAS_AREAS_IDS}) as tickets_otras_areas,
         COUNT(*) as total_tickets,
         ROUND(AVG(EXTRACT(EPOCH FROM (COALESCE(date_closed, date_updated) - date_created)) / 3600)::numeric, 1) as tiempo_promedio_horas
       FROM support_candy_tickets t
@@ -191,7 +217,7 @@ app.get('/api/kpis', async (req, res) => {
     res.json({
       tickets_abiertos: parseInt(row.tickets_abiertos || 0),
       tickets_cerrados: parseInt(row.tickets_cerrados || 0),
-      tickets_spam: parseInt(row.tickets_spam || 0),
+      tickets_otras_areas: parseInt(row.tickets_otras_areas || 0),
       total_tickets: parseInt(row.total_tickets || 0),
       tiempo_promedio_horas: parseFloat(row.tiempo_promedio_horas || 0)
     });
@@ -366,7 +392,8 @@ async function calcularRezagados() {
       FROM support_candy_tickets t
       LEFT JOIN sc_statuses s ON t.status = s.status_id
       WHERE t.status IS NOT NULL
-        AND t.status NOT IN (5, 6)
+        AND t.status NOT IN ${SQL_CERRADO_IDS}
+        AND t.status NOT IN ${SQL_SPAM_IDS}
         AND t.date_created IS NOT NULL
         AND t.date_created <= NOW() - INTERVAL '3 days'
         AND EXISTS (
@@ -503,6 +530,7 @@ app.get('/api/rendimiento-agentes', async (req, res) => {
       ORDER BY t.ticket_id, t.date_updated DESC
     `);
 
+    const estadosEsp = await getEstadosEspeciales();
     const currentAgentByTicket = {};
     const actualizacionIds = new Set();
     ticketsResult.rows.forEach(t => {
@@ -510,10 +538,10 @@ app.get('/api/rendimiento-agentes', async (req, res) => {
       const ids = t.assigned_agent.toString().split('|').map(v => v.trim());
       currentAgentByTicket[t.ticket_id] = ids[0];
       ids.filter(id => CAU_AGENTS.includes(id) && stats[id]).forEach(id => {
-        const st = parseInt(t.status);
-        if (st === 6) return; // spam no cuenta
+        const st = String(t.status);
+        if (estadosEsp.spam.has(st)) return; // spam no cuenta
         stats[id].asignados++;
-        if (st === 5) stats[id].cerrados++;
+        if (estadosEsp.cerrado.has(st)) stats[id].cerrados++;
         else stats[id].abiertos++;
       });
     });
@@ -616,10 +644,10 @@ app.get('/api/tendencia-tickets', async (req, res) => {
       SELECT DISTINCT ON (t.ticket_id)
         t.ticket_id,
         ${fechaMX('t.date_created')} AS creado,
-        CASE WHEN t.status = 5 THEN ${fechaMX('COALESCE(t.date_closed, t.date_updated)')} END AS cerrado
+        CASE WHEN t.status IN ${SQL_CERRADO_IDS} THEN ${fechaMX('COALESCE(t.date_closed, t.date_updated)')} END AS cerrado
       FROM support_candy_tickets t
       WHERE t.date_created IS NOT NULL
-        AND (t.status IS NULL OR t.status <> 6)
+        AND (t.status IS NULL OR t.status NOT IN ${SQL_SPAM_IDS})
         AND ${CAU_AGENT_FILTER}
       ORDER BY t.ticket_id, t.date_updated DESC
     `);
@@ -706,7 +734,7 @@ app.get('/api/tiempo-por-estado', async (req, res) => {
       JOIN (
         SELECT DISTINCT ON (t.ticket_id) t.ticket_id, t.date_created
         FROM support_candy_tickets t
-        WHERE (t.status IS NULL OR t.status <> 6)
+        WHERE (t.status IS NULL OR t.status NOT IN ${SQL_SPAM_IDS})
           AND ${CAU_AGENT_FILTER}
           AND NOT ${ES_ACTUALIZACION}
           ${dateFilter}
@@ -788,7 +816,7 @@ app.get('/api/impacto-por-instancia', async (req, res) => {
       FROM (
         SELECT DISTINCT ON (t.ticket_id) t.*
         FROM support_candy_tickets t
-        WHERE (t.status IS NULL OR t.status <> 6)
+        WHERE (t.status IS NULL OR t.status NOT IN ${SQL_SPAM_IDS})
           AND t.cust_26 IS NOT NULL AND t.cust_26 <> ''
           AND ${CAU_AGENT_FILTER}
           ${dateFilter}
@@ -874,7 +902,8 @@ app.get('/api/carga-agentes', async (req, res) => {
       FROM support_candy_tickets t
       LEFT JOIN sc_statuses s ON t.status = s.status_id
       WHERE t.status IS NOT NULL
-        AND t.status NOT IN (5, 6)
+        AND t.status NOT IN ${SQL_CERRADO_IDS}
+        AND t.status NOT IN ${SQL_SPAM_IDS}
         AND ${CAU_AGENT_FILTER}
       ORDER BY t.ticket_id, t.date_updated DESC
     `);
@@ -943,10 +972,10 @@ app.get('/api/actualizaciones', async (req, res) => {
         t.date_created, t.date_closed, t.date_updated, s.status_name_es
       FROM support_candy_tickets t
       LEFT JOIN sc_statuses s ON t.status = s.status_id
-      WHERE (t.status IS NULL OR t.status <> 6)
+      WHERE (t.status IS NULL OR t.status NOT IN ${SQL_SPAM_IDS})
         AND ${ES_ACTUALIZACION}
         AND (
-          t.status IS NULL OR t.status <> 5
+          t.status IS NULL OR t.status NOT IN ${SQL_CERRADO_IDS}
           OR COALESCE(t.date_closed, t.date_updated) >= NOW() - INTERVAL '14 days'
         )
       ORDER BY t.ticket_id, t.date_updated DESC
@@ -974,9 +1003,10 @@ app.get('/api/actualizaciones', async (req, res) => {
     const now = new Date();
     const DAY = 86400000;
     const redondear = (ms) => Math.round((ms / DAY) * 10) / 10;
+    const estadosEsp = await getEstadosEspeciales();
 
     const tickets = result.rows.map(t => {
-      const cerrado = parseInt(t.status) === 5;
+      const cerrado = estadosEsp.cerrado.has(String(t.status));
       const fin = cerrado ? new Date(t.date_closed || t.date_updated) : now;
       const created = new Date(t.date_created);
       const history = histByTicket[t.ticket_id] || [];
