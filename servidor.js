@@ -1185,17 +1185,21 @@ app.get('/api/ticket-timeline/:ticketId', async (req, res) => {
       : null;
 
     // Helper para convertir segundos a formato legible
+    // Formato: "3d 4h 12m" si hay días (sin segundos), "4h 12m 5s" si no
     const formatDuration = (seconds) => {
-      const hours = Math.floor(seconds / 3600);
+      seconds = Math.floor(seconds);
+      const days = Math.floor(seconds / 86400);
+      const hours = Math.floor((seconds % 86400) / 3600);
       const minutes = Math.floor((seconds % 3600) / 60);
       const secs = seconds % 60;
-      
+
       let result = '';
+      if (days > 0) result += `${days}d `;
       if (hours > 0) result += `${hours}h `;
       if (minutes > 0) result += `${minutes}m `;
-      if (secs > 0 || result === '') result += `${secs}s`;
-      
-      return result.trim();
+      if (days === 0 && (secs > 0 || result === '')) result += `${secs}s`;
+
+      return result.trim() || '0s';
     };
 
     // Clasificar cada estado en un grupo

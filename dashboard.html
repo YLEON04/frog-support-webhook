@@ -1524,6 +1524,11 @@
         const formatHoras = (h) => {
           if (h === null) return '-';
           if (h < 1) return `${Math.round(h * 60)} min`;
+          if (h >= 24) {
+            const dias = Math.floor(h / 24);
+            const horas = Math.round(h % 24);
+            return horas ? `${dias}d ${horas}h` : `${dias}d`;
+          }
           return `${h} h`;
         };
 
@@ -1619,7 +1624,15 @@
         if (charts['horasEstadoChart']) charts['horasEstadoChart'].destroy();
 
         const colores = { espera: '#f0ad4e', cau: '#e53935', cliente: '#43a047', otras: '#764ba2' };
-        const formatHoras = (h) => h < 1 ? `${Math.round(h * 60)} min` : (h >= 48 ? `${Math.round(h / 24 * 10) / 10} días` : `${h} h`);
+        const formatHoras = (h) => {
+          if (h < 1) return `${Math.round(h * 60)} min`;
+          if (h >= 24) {
+            const dias = Math.floor(h / 24);
+            const horas = Math.round(h % 24);
+            return horas ? `${dias}d ${horas}h` : `${dias}d`;
+          }
+          return `${h} h`;
+        };
 
         const ctx = document.getElementById('horasEstadoChart').getContext('2d');
         charts['horasEstadoChart'] = new Chart(ctx, {
