@@ -209,8 +209,7 @@ app.get('/api/kpis', async (req, res) => {
         COUNT(*) as total_tickets,
         ROUND(AVG(EXTRACT(EPOCH FROM (COALESCE(date_closed, date_updated) - date_created)) / 3600)::numeric, 1) as tiempo_promedio_horas
       FROM support_candy_tickets t
-      LEFT JOIN sc_agents a ON t.assigned_agent::text LIKE '%' || a.agent_id::text || '%'
-      WHERE a.agent_id IN (22, 23, 17, 5, 3) ${dateFilter}
+      WHERE ${CAU_AGENT_FILTER} ${dateFilter}
     `);
 
     const row = result.rows[0];
@@ -237,9 +236,10 @@ app.get('/api/tickets-por-estado', async (req, res) => {
     const result = await pool.query(`
       SELECT s.status_id, s.status_name_es, COUNT(DISTINCT t.ticket_id) as cantidad
       FROM sc_statuses s
-      LEFT JOIN support_candy_tickets t ON t.status = s.status_id
-      LEFT JOIN sc_agents a ON t.assigned_agent::text LIKE '%' || a.agent_id::text || '%'
-      WHERE (a.agent_id IN (22, 23, 17, 5, 3) OR t.ticket_id IS NULL) ${dateFilter}
+      LEFT JOIN (
+        SELECT t.ticket_id, t.status FROM support_candy_tickets t
+        WHERE ${CAU_AGENT_FILTER} ${dateFilter}
+      ) t ON t.status = s.status_id
       GROUP BY s.status_id, s.status_name_es
       ORDER BY s.status_id ASC
     `);
@@ -263,12 +263,13 @@ app.get('/api/tickets-por-agente', async (req, res) => {
     const result = await pool.query(`
       SELECT a.agent_id, a.agent_name, COUNT(DISTINCT t.ticket_id) as cantidad
       FROM sc_agents a
-      LEFT JOIN support_candy_tickets t ON (
-        t.assigned_agent::text = a.agent_id::text OR
-        t.assigned_agent::text LIKE a.agent_id::text || '|%' OR
-        t.assigned_agent::text LIKE '%|' || a.agent_id::text
-      )
-      WHERE a.agent_id IN (22, 23, 17, 5, 3) ${dateFilter}
+      LEFT JOIN (
+        SELECT t.ticket_id, TRIM(ag.id) AS agent_id
+        FROM support_candy_tickets t
+        CROSS JOIN LATERAL unnest(string_to_array(t.assigned_agent::text, '|')) AS ag(id)
+        WHERE 1 = 1 ${dateFilter}
+      ) t ON t.agent_id = a.agent_id::text
+      WHERE a.agent_id IN (22, 23, 17, 5, 3)
       GROUP BY a.agent_id, a.agent_name
       ORDER BY cantidad DESC
     `);
@@ -292,9 +293,10 @@ app.get('/api/tickets-por-categoria', async (req, res) => {
     const result = await pool.query(`
       SELECT c.category_id, c.category_name, COUNT(DISTINCT t.ticket_id) as cantidad
       FROM sc_categories c
-      LEFT JOIN support_candy_tickets t ON t.category = c.category_id
-      LEFT JOIN sc_agents a ON t.assigned_agent::text LIKE '%' || a.agent_id::text || '%'
-      WHERE a.agent_id IN (22, 23, 17, 5, 3) ${dateFilter}
+      JOIN (
+        SELECT t.ticket_id, t.category FROM support_candy_tickets t
+        WHERE ${CAU_AGENT_FILTER} ${dateFilter}
+      ) t ON t.category = c.category_id
       GROUP BY c.category_id, c.category_name
       ORDER BY cantidad DESC
     `);
@@ -318,8 +320,7 @@ app.get('/api/tickets-por-instancia', async (req, res) => {
     const result = await pool.query(`
       SELECT t.cust_26, COUNT(DISTINCT t.ticket_id) as cantidad
       FROM support_candy_tickets t
-      LEFT JOIN sc_agents a ON t.assigned_agent::text LIKE '%' || a.agent_id::text || '%'
-      WHERE a.agent_id IN (22, 23, 17, 5, 3) AND t.cust_26 IS NOT NULL AND t.cust_26 != '' ${dateFilter}
+      WHERE ${CAU_AGENT_FILTER} AND t.cust_26 IS NOT NULL AND t.cust_26 != '' ${dateFilter}
       GROUP BY t.cust_26
       ORDER BY cantidad DESC
       LIMIT 20
