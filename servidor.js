@@ -50,6 +50,12 @@ app.post('/webhook/support-candy', async (req, res) => {
     const changeData = esCambioEstado ? rawChange : {};
     console.log(`📌 Evento: ${evento}`);
 
+    // Diagnóstico de webhooks de campos: qué llega realmente
+    if (evento !== 'estado') {
+      const t = data.ticket || (data.payload && data.payload.ticket) || {};
+      console.log(`🔎 [${evento}] ticket #${t.id} · cust_44 en payload: ${JSON.stringify(t.cust_44)} · data: ${JSON.stringify(rawChange).slice(0, 500)}`);
+    }
+
     if (!ticket) {
       console.log('⚠️ Estructura inválida - no hay ticket');
       return res.json({ success: false, message: 'Estructura inválida' });
