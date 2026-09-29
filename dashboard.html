@@ -787,6 +787,95 @@
       margin-right: 6px;
     }
 
+    /* Actualizaciones por etapa */
+    .updates-summary {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 15px;
+    }
+
+    .updates-chip {
+      background: #f0f2ff;
+      color: #667eea;
+      padding: 8px 14px;
+      border-radius: 20px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .updates-table {
+      overflow-x: auto;
+    }
+
+    .updates-table table tr {
+      cursor: pointer;
+    }
+
+    .updates-table tr.closed {
+      opacity: 0.6;
+    }
+
+    .stepper {
+      display: flex;
+      align-items: flex-start;
+      gap: 0;
+      min-width: 420px;
+    }
+
+    .step {
+      flex: 1;
+      text-align: center;
+      position: relative;
+      font-size: 11px;
+      color: #999;
+    }
+
+    .step::before {
+      content: '';
+      position: absolute;
+      top: 11px;
+      left: -50%;
+      width: 100%;
+      height: 3px;
+      background: #e0e0e0;
+      z-index: 0;
+    }
+
+    .step:first-child::before {
+      display: none;
+    }
+
+    .step.done::before,
+    .step.current::before {
+      background: #43a047;
+    }
+
+    .step-dot {
+      position: relative;
+      z-index: 1;
+      width: 24px;
+      height: 24px;
+      line-height: 24px;
+      margin: 0 auto 4px;
+      border-radius: 50%;
+      background: #e0e0e0;
+      color: white;
+      font-weight: bold;
+      font-size: 12px;
+    }
+
+    .step.done .step-dot { background: #43a047; }
+    .step.current .step-dot { background: #667eea; box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.25); }
+    .step.done, .step.current { color: #333; }
+    .step.current { font-weight: 600; }
+
+    .step-days {
+      display: block;
+      color: #667eea;
+      font-weight: 600;
+    }
+
     #ticketsContainer {
       overflow-x: auto;
     }
@@ -923,6 +1012,7 @@
       <button class="tab-btn active" data-tab="tab-rezago" onclick="showTab('tab-rezago')">⏰ Rezago</button>
       <button class="tab-btn" data-tab="tab-carga" onclick="showTab('tab-carga')">⚖️ Carga de trabajo</button>
       <button class="tab-btn" data-tab="tab-rendimiento" onclick="showTab('tab-rendimiento')">🏆 Rendimiento</button>
+      <button class="tab-btn" data-tab="tab-actualizaciones" onclick="showTab('tab-actualizaciones')">🔄 Actualizaciones</button>
       <button class="tab-btn" data-tab="tab-tendencias" onclick="showTab('tab-tendencias')">📊 Tendencias</button>
       <button class="tab-btn" data-tab="tab-distribuciones" onclick="showTab('tab-distribuciones')">📈 Distribuciones</button>
     </div>
@@ -964,6 +1054,15 @@
       <div id="rendimientoTable" class="performance-table"></div>
     </div>
 
+    </div>
+
+    <div class="tab-panel" id="tab-actualizaciones">
+      <div class="updates-section">
+        <h2 class="section-title">🔄 Actualizaciones de instancia por etapa</h2>
+        <div id="updatesSummary" class="updates-summary"></div>
+        <div id="updatesTable" class="updates-table"></div>
+        <p class="perf-note">Abiertas y cerradas en los últimos 14 días. Estos tickets tienen su propio umbral de rezago (7 días) y no cuentan en "¿Dónde se van las horas?" ni en la reacción por agente. Clic en una fila para ver su timeline.</p>
+      </div>
     </div>
 
     <div class="tab-panel" id="tab-tendencias">
@@ -1120,6 +1219,7 @@
           loadChart('impactoChart', 'tickets-por-impacto', params, 'Impacto'),
           loadAgingChart(),
           loadCarga(),
+          loadActualizaciones(),
           loadPerformance(params),
           loadTendencia(params),
           loadHorasPorEstado(params),
@@ -1237,7 +1337,7 @@
         document.getElementById('agingSummary').innerHTML = `
           <div class="aging-pill alerta">🟠 3 a 7 días: ${data.alerta}</div>
           <div class="aging-pill critico">🔴 Más de 7 días: ${data.critico}</div>
-          <div class="aging-note">No cuenta el tiempo "Con cliente" · No depende del filtro de fechas · Clic en una barra para ver su timeline</div>
+          <div class="aging-note">No cuenta el tiempo "Con cliente" · Actualizaciones de instancia: a partir de 7 días · No depende del filtro de fechas · Clic en una barra para ver su timeline</div>
         `;
 
         if (charts['agingChart']) {
@@ -1298,6 +1398,9 @@
                     ];
                     if (t.sinHistorico) {
                       lines.push('⚠️ Sin histórico de estados: se cuenta el tiempo total');
+                    }
+                    if (t.esActualizacion) {
+                      lines.push('🔄 Actualización de instancia (umbral de 7 días)');
                     }
                     return lines;
                   }
@@ -1692,6 +1795,65 @@
 
       } catch (error) {
         console.error('Error cargando carga de trabajo:', error);
+      }
+    }
+
+    async function loadActualizaciones() {
+      try {
+        const response = await fetch('/api/actualizaciones');
+        const data = await response.json();
+        const etapas = data.etapas || [];
+        const tickets = data.tickets || [];
+
+        const abiertos = tickets.filter(t => !t.cerrado);
+
+        // Resumen: cuántas hay en cada etapa
+        const conteo = {};
+        abiertos.forEach(t => {
+          const nombre = t.etapaActual ? t.etapaActual.name : 'Sin etapa';
+          conteo[nombre] = (conteo[nombre] || 0) + 1;
+        });
+        const orden = [...etapas.map(e => e.name), 'Sin etapa'];
+        document.getElementById('updatesSummary').innerHTML =
+          `<span class="updates-chip">🔄 En proceso: ${abiertos.length}</span>` +
+          orden.filter(n => conteo[n]).map(n => `<span class="updates-chip">${n}: ${conteo[n]}</span>`).join('');
+
+        if (tickets.length === 0) {
+          document.getElementById('updatesTable').innerHTML = '<div class="aging-empty">No hay actualizaciones en proceso</div>';
+          return;
+        }
+
+        const stepper = (t) => {
+          const ordenActual = t.etapaActual ? t.etapaActual.orden : 0;
+          return '<div class="stepper">' + etapas.map((e, i) => {
+            let clase = '';
+            if (t.cerrado || e.orden < ordenActual) clase = 'done';
+            else if (e.orden === ordenActual) clase = 'current';
+            const dias = t.diasPorEtapa[e.id];
+            const diasTxt = dias !== undefined ? `<span class="step-days">${dias} d</span>` : '';
+            return `<div class="step ${clase}"><div class="step-dot">${clase === 'done' ? '✓' : i + 1}</div>${e.name}${diasTxt}</div>`;
+          }).join('') + '</div>';
+        };
+
+        let html = '<table><thead><tr><th>Ticket</th><th>Instancia</th><th>Agente</th><th>Avance</th><th>En etapa actual</th><th>Total</th></tr></thead><tbody>';
+        tickets.forEach(t => {
+          const enEtapa = t.diasEtapaActual !== null ? `${t.diasEtapaActual} d` : '-';
+          const alertaTotal = !t.cerrado && t.diasTotales > 7 ? 'perf-bad' : '';
+          html += `
+            <tr class="${t.cerrado ? 'closed' : ''}" onclick="openTimeline(${t.id})">
+              <td class="ticket-id"><a class="sc-link" href="${scTicketLink(t.id)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="Abrir en Support Candy">#${t.id} ↗</a>${t.cerrado ? '<br><small>✅ Cerrado</small>' : ''}</td>
+              <td><strong>${t.instance}</strong><br><small style="color:#888;">${t.subject}</small></td>
+              <td>${t.agent}</td>
+              <td>${t.etapaActual || t.cerrado ? stepper(t) : '<span style="color:#999;">Sin etapa capturada</span>'}</td>
+              <td>${enEtapa}</td>
+              <td class="${alertaTotal}">${t.diasTotales} d</td>
+            </tr>`;
+        });
+        html += '</tbody></table>';
+        document.getElementById('updatesTable').innerHTML = html;
+
+      } catch (error) {
+        console.error('Error cargando actualizaciones:', error);
       }
     }
 

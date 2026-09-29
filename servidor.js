@@ -62,11 +62,11 @@ app.post('/webhook/support-candy', async (req, res) => {
        date_closed, user_type, last_reply_on, last_reply_by, last_reply_source, auth_code, tags, 
        live_agents, misc, frd, ard, cd, cg, cust_26, cust_28, cust_29, cust_30, cust_31, cust_32, 
        cust_33, cust_34, pin, rating, sf_feedback, sf_date, sla, od_count, od_email, sla_policy, 
-       time_spent, cust_40, cust_41, cust_42, previous_status, new_status, data_json)
+       time_spent, cust_40, cust_41, cust_42, previous_status, new_status, data_json, cust_44)
       VALUES 
       ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 
        $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36,
-       $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52)
+       $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53)
      ON CONFLICT (ticket_id) DO UPDATE SET
         status = $5,
         priority = $6,
@@ -75,6 +75,7 @@ app.post('/webhook/support-candy', async (req, res) => {
         category = $7,
         cust_41 = $48,
         cust_26 = $30,
+        cust_44 = $53,
         date_updated = $10,
         last_reply_on = $19,
         last_reply_by = $20,
@@ -97,10 +98,29 @@ app.post('/webhook/support-candy', async (req, res) => {
       ticket.pin || 0, ticket.rating || 0, ticket.sf_feedback || '', fixDate(ticket.sf_date),
       fixDate(ticket.sla), ticket.od_count || 0, ticket.od_email || 0, ticket.sla_policy || 0,
       ticket.time_spent || '', ticket.cust_40 || null, normalizeMulti(ticket.cust_41), ticket.cust_42 || '',
-      changeData.previous || null, changeData.new || null, JSON.stringify(data)
+      changeData.previous || null, changeData.new || null, JSON.stringify(data),
+      normalizeMulti(ticket.cust_44)
     ];
 
+    // Etapa de actualización (cust_44) antes de guardar, para detectar si cambió
+    const prevEtapaResult = await pool.query(
+      'SELECT cust_44 FROM support_candy_tickets WHERE ticket_id = $1', [ticket.id]
+    );
+    const etapaAnterior = prevEtapaResult.rows.length ? (prevEtapaResult.rows[0].cust_44 || null) : null;
+    const etapaNueva = normalizeMulti(ticket.cust_44);
+
     await pool.query(query, values);
+
+    // GUARDAR EN BITÁCORA DE ETAPAS (solo si la etapa cambió)
+    if (etapaNueva && etapaNueva !== etapaAnterior) {
+      const agentIdEtapa = ticket.assigned_agent ? ticket.assigned_agent.toString().split('|')[0] : null;
+      await pool.query(
+        `INSERT INTO ticket_stage_history (ticket_id, previous_stage, new_stage, agent_id)
+         VALUES ($1, $2, $3, $4)`,
+        [ticket.id, etapaAnterior, etapaNueva, agentIdEtapa]
+      );
+      console.log(`🔄 Etapa de actualización: ${etapaAnterior || '-'} → ${etapaNueva}`);
+    }
     
     // GUARDAR EN HISTÓRICO
     if (changeData.previous && changeData.new) {
@@ -318,6 +338,15 @@ app.get('/api/tickets-por-impacto', async (req, res) => {
   }
 });
 
+// Ticket de actualización de instancia: categoría "Actualización" o con Etapa de actualización (cust_44)
+const ES_ACTUALIZACION = `(
+  (t.cust_44 IS NOT NULL AND t.cust_44 <> '')
+  OR EXISTS (
+    SELECT 1 FROM sc_categories c_act
+    WHERE c_act.category_id = t.category AND lower(c_act.category_name) LIKE 'actualizaci%'
+  )
+)`;
+
 // API: Tickets abiertos con rezago (más de 3 días SIN contar el tiempo "Con cliente")
 // No usa el filtro de fechas: siempre muestra lo que sigue abierto hoy
 async function calcularRezagados() {
@@ -326,7 +355,8 @@ async function calcularRezagados() {
     const result = await pool.query(`
       SELECT DISTINCT ON (t.ticket_id)
         t.ticket_id, t.subject, t.cust_26, t.assigned_agent, t.date_created,
-        s.status_name_es
+        s.status_name_es,
+        ${ES_ACTUALIZACION} AS es_actualizacion
       FROM support_candy_tickets t
       LEFT JOIN sc_statuses s ON t.status = s.status_id
       WHERE t.status IS NOT NULL
@@ -405,10 +435,12 @@ async function calcularRezagados() {
         diasTotales: Math.round((totalSeconds / DAY) * 10) / 10,
         diasCliente: Math.round((clienteSeconds / DAY) * 10) / 10,
         sinHistorico: history.length === 0,
-        nivel: dias > 7 ? 'critico' : 'alerta'
+        esActualizacion: !!t.es_actualizacion,
+        // Actualizaciones: su ciclo normal es ~1 semana → alerta a los 7 días, crítico a los 14
+        nivel: t.es_actualizacion ? (dias > 14 ? 'critico' : 'alerta') : (dias > 7 ? 'critico' : 'alerta')
       };
     })
-    .filter(t => t.dias > 3)
+    .filter(t => t.dias > (t.esActualizacion ? 7 : 3))
     .sort((a, b) => b.dias - a.dias);
 
     return tickets;
@@ -458,14 +490,17 @@ app.get('/api/rendimiento-agentes', async (req, res) => {
 
     // 1. Tickets del periodo (asignados, cerrados, abiertos)
     const ticketsResult = await pool.query(`
-      SELECT DISTINCT ON (t.ticket_id) t.ticket_id, t.status, t.assigned_agent
+      SELECT DISTINCT ON (t.ticket_id) t.ticket_id, t.status, t.assigned_agent,
+        ${ES_ACTUALIZACION} AS es_actualizacion
       FROM support_candy_tickets t
       WHERE t.assigned_agent IS NOT NULL ${dateFilter}
       ORDER BY t.ticket_id, t.date_updated DESC
     `);
 
     const currentAgentByTicket = {};
+    const actualizacionIds = new Set();
     ticketsResult.rows.forEach(t => {
+      if (t.es_actualizacion) actualizacionIds.add(t.ticket_id.toString());
       const ids = t.assigned_agent.toString().split('|').map(v => v.trim());
       currentAgentByTicket[t.ticket_id] = ids[0];
       ids.filter(id => CAU_AGENTS.includes(id) && stats[id]).forEach(id => {
@@ -497,6 +532,8 @@ app.get('/api/rendimiento-agentes', async (req, res) => {
       const normalize = (txt) => (txt || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
 
       Object.keys(byTicket).forEach(ticketId => {
+        // Las actualizaciones tienen su propio ciclo: no cuentan en la reacción
+        if (actualizacionIds.has(ticketId.toString())) return;
         const rows = byTicket[ticketId];
         rows.forEach((row, i) => {
           const next = rows[i + 1];
@@ -657,14 +694,15 @@ app.get('/api/tiempo-por-estado', async (req, res) => {
 
     const hist = await pool.query(`
       SELECT tsh.ticket_id, tsh.changed_at, t.date_created,
-             s_prev.status_name_es AS prev_name,
-             s_new.status_name_es AS new_name
+             COALESCE(s_prev.status_name_es, 'Estado ' || tsh.previous_status) AS prev_name,
+             COALESCE(s_new.status_name_es, 'Estado ' || tsh.new_status) AS new_name
       FROM ticket_state_history tsh
       JOIN (
         SELECT DISTINCT ON (t.ticket_id) t.ticket_id, t.date_created
         FROM support_candy_tickets t
         WHERE (t.status IS NULL OR t.status <> 6)
           AND ${CAU_AGENT_FILTER}
+          AND NOT ${ES_ACTUALIZACION}
           ${dateFilter}
         ORDER BY t.ticket_id, t.date_updated DESC
       ) t ON t.ticket_id = tsh.ticket_id
@@ -701,9 +739,18 @@ app.get('/api/tiempo-por-estado', async (req, res) => {
       });
     });
 
+    // Incluir todos los estados del catálogo (menos Cerrado y Spam), aunque tengan 0
+    const catalogo = await pool.query('SELECT status_id, status_name_es FROM sc_statuses ORDER BY status_id');
+    catalogo.rows.forEach(r => {
+      const nombre = r.status_name_es;
+      const g = grupoEstado(nombre);
+      if (g === 'cerrado' || normalizeTxt(nombre) === 'spam') return;
+      if (!porEstado[nombre]) porEstado[nombre] = {};
+    });
+
     const estados = Object.keys(porEstado).map(estado => {
       const valores = Object.values(porEstado[estado]);
-      const promedio = valores.reduce((a, b) => a + b, 0) / valores.length;
+      const promedio = valores.length ? valores.reduce((a, b) => a + b, 0) / valores.length : 0;
       return {
         estado,
         grupo: grupoEstado(estado),
@@ -863,6 +910,107 @@ app.get('/api/carga-agentes', async (req, res) => {
 
   } catch (error) {
     console.error('Error en /api/carga-agentes:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Seguimiento de actualizaciones de instancia por etapa (cust_44)
+// Muestra las abiertas y las cerradas en los últimos 14 días
+app.get('/api/actualizaciones', async (req, res) => {
+  try {
+    const etapasResult = await pool.query('SELECT id, name, sort_order FROM sc_update_stages ORDER BY sort_order');
+    const etapas = etapasResult.rows.map(e => ({ id: e.id.toString(), name: e.name, orden: e.sort_order }));
+    const etapaMap = {};
+    etapas.forEach(e => { etapaMap[e.id] = e; });
+
+    // Etapa actual: si hay varias (multi-select), la más avanzada
+    const etapaActualDe = (raw) => {
+      if (!raw) return null;
+      const ids = raw.toString().split(/[^0-9]+/).filter(v => v !== '');
+      const conocidas = ids.map(id => etapaMap[id] || { id, name: `Etapa ${id}`, orden: 999 });
+      return conocidas.sort((a, b) => b.orden - a.orden)[0] || null;
+    };
+
+    const result = await pool.query(`
+      SELECT DISTINCT ON (t.ticket_id)
+        t.ticket_id, t.subject, t.cust_26, t.cust_44, t.assigned_agent, t.status,
+        t.date_created, t.date_closed, t.date_updated, s.status_name_es
+      FROM support_candy_tickets t
+      LEFT JOIN sc_statuses s ON t.status = s.status_id
+      WHERE (t.status IS NULL OR t.status <> 6)
+        AND ${ES_ACTUALIZACION}
+        AND (
+          t.status IS NULL OR t.status <> 5
+          OR COALESCE(t.date_closed, t.date_updated) >= NOW() - INTERVAL '14 days'
+        )
+      ORDER BY t.ticket_id, t.date_updated DESC
+    `);
+
+    const agentsResult = await pool.query('SELECT agent_id, agent_name FROM sc_agents');
+    const agentMap = {};
+    agentsResult.rows.forEach(a => { agentMap[a.agent_id.toString()] = a.agent_name; });
+
+    const ids = result.rows.map(r => r.ticket_id);
+    const histByTicket = {};
+    if (ids.length) {
+      const hist = await pool.query(`
+        SELECT ticket_id, new_stage, changed_at
+        FROM ticket_stage_history
+        WHERE ticket_id = ANY($1)
+        ORDER BY ticket_id, changed_at ASC
+      `, [ids]);
+      hist.rows.forEach(h => {
+        if (!histByTicket[h.ticket_id]) histByTicket[h.ticket_id] = [];
+        histByTicket[h.ticket_id].push(h);
+      });
+    }
+
+    const now = new Date();
+    const DAY = 86400000;
+    const redondear = (ms) => Math.round((ms / DAY) * 10) / 10;
+
+    const tickets = result.rows.map(t => {
+      const cerrado = parseInt(t.status) === 5;
+      const fin = cerrado ? new Date(t.date_closed || t.date_updated) : now;
+      const created = new Date(t.date_created);
+      const history = histByTicket[t.ticket_id] || [];
+      const actual = etapaActualDe(t.cust_44);
+
+      // Días por etapa según la bitácora
+      const diasPorEtapa = {};
+      history.forEach((h, i) => {
+        const etapa = etapaActualDe(h.new_stage);
+        if (!etapa) return;
+        const inicio = new Date(h.changed_at);
+        const hasta = history[i + 1] ? new Date(history[i + 1].changed_at) : fin;
+        diasPorEtapa[etapa.id] = (diasPorEtapa[etapa.id] || 0) + Math.max(0, hasta - inicio);
+      });
+      Object.keys(diasPorEtapa).forEach(k => { diasPorEtapa[k] = redondear(diasPorEtapa[k]); });
+
+      const ultimoCambio = history.length ? new Date(history[history.length - 1].changed_at) : null;
+      const agentId = t.assigned_agent ? t.assigned_agent.toString().split('|')[0].trim() : null;
+
+      return {
+        id: t.ticket_id,
+        subject: t.subject || '',
+        instance: t.cust_26 || '-',
+        status: t.status_name_es || '-',
+        agent: (agentId && agentMap[agentId]) || 'Sin asignar',
+        cerrado,
+        etapaActual: actual,
+        diasEtapaActual: ultimoCambio ? redondear(Math.max(0, fin - ultimoCambio)) : null,
+        diasTotales: redondear(Math.max(0, fin - created)),
+        diasPorEtapa,
+        sinHistorico: history.length === 0
+      };
+    })
+    // Abiertas primero; dentro de cada grupo, las que llevan más tiempo
+    .sort((a, b) => (a.cerrado - b.cerrado) || (b.diasTotales - a.diasTotales));
+
+    res.json({ etapas, tickets });
+
+  } catch (error) {
+    console.error('Error en /api/actualizaciones:', error.message);
     res.status(500).json({ error: error.message });
   }
 });
