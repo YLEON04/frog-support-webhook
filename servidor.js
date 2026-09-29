@@ -456,7 +456,10 @@ async function calcularRezagados() {
       }
 
       const atencionSeconds = Math.max(0, totalSeconds - clienteSeconds);
-      const agentId = t.assigned_agent ? t.assigned_agent.toString().split('|')[0].trim() : null;
+      const agentIds = t.assigned_agent
+        ? t.assigned_agent.toString().split('|').map(v => v.trim()).filter(v => v !== '')
+        : [];
+      const agentNombres = agentIds.map(id => agentMap[id]).filter(Boolean);
       const dias = Math.round((atencionSeconds / DAY) * 10) / 10;
 
       return {
@@ -464,7 +467,8 @@ async function calcularRezagados() {
         subject: t.subject || '',
         instance: t.cust_26 || '-',
         status: t.status_name_es || '-',
-        agent: (agentId && agentMap[agentId]) || 'Sin asignar',
+        agent: agentNombres.length ? agentNombres.join(', ') : 'Sin asignar',
+        agentes: agentNombres,
         dias,                                                      // sin contar tiempo con cliente
         diasTotales: Math.round((totalSeconds / DAY) * 10) / 10,
         diasCliente: Math.round((clienteSeconds / DAY) * 10) / 10,
@@ -587,8 +591,10 @@ app.get('/api/rendimiento-agentes', async (req, res) => {
     const nameToId = {};
     Object.values(stats).forEach(s => { nameToId[s.agent] = s.agentId.toString(); });
     rezagados.forEach(t => {
-      const id = nameToId[t.agent];
-      if (id && stats[id]) stats[id].rezagados++;
+      (t.agentes || [t.agent]).forEach(nombre => {
+        const id = nameToId[nombre];
+        if (id && stats[id]) stats[id].rezagados++;
+      });
     });
 
     // 4. Resultado
@@ -1025,14 +1031,15 @@ app.get('/api/actualizaciones', async (req, res) => {
       Object.keys(diasPorEtapa).forEach(k => { diasPorEtapa[k] = redondear(diasPorEtapa[k]); });
 
       const ultimoCambio = history.length ? new Date(history[history.length - 1].changed_at) : null;
-      const agentId = t.assigned_agent ? t.assigned_agent.toString().split('|')[0].trim() : null;
+      const agentNombres = (t.assigned_agent ? t.assigned_agent.toString().split('|') : [])
+        .map(v => agentMap[v.trim()]).filter(Boolean);
 
       return {
         id: t.ticket_id,
         subject: t.subject || '',
         instance: t.cust_26 || '-',
         status: t.status_name_es || '-',
-        agent: (agentId && agentMap[agentId]) || 'Sin asignar',
+        agent: agentNombres.length ? agentNombres.join(', ') : 'Sin asignar',
         cerrado,
         etapaActual: actual,
         diasEtapaActual: ultimoCambio ? redondear(Math.max(0, fin - ultimoCambio)) : null,
@@ -1089,27 +1096,19 @@ app.get('/api/tickets', async (req, res) => {
       return names.length ? names.join(', ') : '-';
     };
 
-    // Obtener nombre del agente por separado
-    const ticketsWithAgents = await Promise.all(result.rows.map(async (t) => {
-      let agentName = 'Sin asignar';
-      let agentId = null;
+    // Catálogo de agentes (una sola consulta) para mostrar TODOS los asignados
+    const agentsCatalog = await pool.query('SELECT agent_id, agent_name FROM sc_agents');
+    const agentNames = {};
+    agentsCatalog.rows.forEach(a => { agentNames[a.agent_id.toString()] = a.agent_name; });
 
+    const ticketsWithAgents = result.rows.map((t) => {
       // Solo assigned_agent: last_reply_by es un ID de CLIENTE en Support Candy,
       // no de agente, y cruzarlo con sc_agents mostraba a la persona equivocada
-      if (t.assigned_agent) {
-        const agentIds = t.assigned_agent.toString().split('|');
-        agentId = parseInt(agentIds[0]);
-      }
-
-      if (agentId) {
-        const agentResult = await pool.query(
-          'SELECT agent_name FROM sc_agents WHERE agent_id = $1',
-          [agentId]
-        );
-        if (agentResult.rows.length > 0) {
-          agentName = agentResult.rows[0].agent_name;
-        }
-      }
+      const ids = t.assigned_agent
+        ? t.assigned_agent.toString().split('|').map(v => v.trim()).filter(v => v !== '')
+        : [];
+      const nombres = ids.map(id => agentNames[id] || `Agente ${id}`);
+      const agentName = nombres.length ? nombres.join(', ') : 'Sin asignar';
 
       return {
         id: t.ticket_id,
@@ -1124,7 +1123,7 @@ app.get('/api/tickets', async (req, res) => {
         created: t.date_created ? new Date(t.date_created).toLocaleDateString('es-MX', { timeZone: 'America/Mexico_City' }) : '-',
         updated: t.date_updated ? new Date(t.date_updated).toLocaleDateString('es-MX', { timeZone: 'America/Mexico_City' }) : '-'
       };
-    }));
+    });
 
     res.json(ticketsWithAgents);
 

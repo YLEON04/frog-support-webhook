@@ -2046,7 +2046,9 @@
         const cellText = agentCell.textContent.trim();
         const normalizedCell = cellText.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
         
-        if (normalizedCell === normalizedFilter) {
+        // Puede haber varios agentes asignados: "Jorge Aguilar, Itzel Ramirez"
+        const agentesFila = normalizedCell.split(',').map(a => a.trim());
+        if (agentesFila.includes(normalizedFilter)) {
           row.dataset.match = '1';
           visibleCount++;
         } else {
