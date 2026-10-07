@@ -1472,6 +1472,22 @@
       margin: 16px 32px 0;
     }
 
+    /* Prioridad (como en Support Candy) */
+    .prio-pill {
+      display: inline-block;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 3px 10px;
+      border-radius: 999px;
+      white-space: nowrap;
+    }
+
+    .prio-baja    { background: #E2F1E9; color: #2B7353; }
+    .prio-media   { background: #FBF1DC; color: #8A5A12; }
+    .prio-alta    { background: #FBE5E6; color: #A3333A; }
+    .prio-urgente { background: #C8434B; color: #FFFFFF; }
+    .prio-otra    { background: var(--niebla); color: var(--gris); }
+
     /* SLA */
     .sla-top {
       display: grid;
@@ -3411,7 +3427,7 @@
 
         tickets.forEach(t => {
           const statusClass = `status-${t.status.toLowerCase().replace(/\s+/g, '-')}`;
-          const priorityClass = `priority-${t.priority.toLowerCase()}`;
+          const priorityClass = `prio-pill prio-${t.priorityKey || 'otra'}`;
 
           html += `
             <tr data-match="1" data-id="${t.id}" onclick="openTimeline(${t.id})">

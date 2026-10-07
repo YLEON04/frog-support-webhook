@@ -1258,7 +1258,8 @@ app.get('/api/tickets', async (req, res) => {
         id: t.ticket_id,
         subject: t.subject,
         status: t.status_name_es || `Status ${t.status}`,
-        priority: priorityMap[t.priority] || `Priority ${t.priority}`,
+        priority: ({ '1': 'Baja', '2': 'Media', '3': 'Alta', '4': 'Urgente' })[t.priority] || (t.priority ? `Prioridad ${t.priority}` : '-'),
+        priorityKey: ({ '1': 'baja', '2': 'media', '3': 'alta', '4': 'urgente' })[t.priority] || 'otra',
         agent: agentName,
         // Si la categoría no está en sc_categories se muestra su número, para detectar que falta en el catálogo
         category: t.category_name || (t.category ? `Categoría ${t.category}` : '-'),
