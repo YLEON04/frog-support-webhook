@@ -1305,6 +1305,111 @@ app.get('/api/ticket-timeline/:ticketId', async (req, res) => {
   }
 });
 
+// ===== PLANEACIÓN DE ACTUALIZACIÓN DE INSTANCIAS =====
+// Tabla editable desde el dashboard. Para editar se pide la clave EDIT_TOKEN (variable de entorno en Render).
+// FIX_OBJETIVO (opcional, por defecto 1093): fix al que se quiere llevar todas las instancias.
+const FIX_OBJETIVO = parseInt(process.env.FIX_OBJETIVO || '1093');
+const ESTADOS_INSTANCIA = ['Pendiente', 'Programada', 'En proceso', 'Actualizada'];
+
+const requireEditToken = (req, res, next) => {
+  if (!process.env.EDIT_TOKEN) {
+    return res.status(403).json({ error: 'La edición no está habilitada: falta EDIT_TOKEN en las variables de Render' });
+  }
+  if (req.get('x-edit-token') !== process.env.EDIT_TOKEN) {
+    return res.status(401).json({ error: 'Clave de edición incorrecta' });
+  }
+  next();
+};
+
+const instanciaDesdeBody = (b) => {
+  const texto = (v, max) => (v === undefined || v === null) ? null : v.toString().trim().slice(0, max) || null;
+  const puerto = b.puerto === '' || b.puerto === null || b.puerto === undefined ? null : parseInt(b.puerto);
+  const fecha = texto(b.fecha_planeada, 10);
+  return {
+    puerto: Number.isNaN(puerto) ? null : puerto,
+    instancia: texto(b.instancia, 100),
+    version: texto(b.version, 30),
+    ensamblados: texto(b.ensamblados, 300),
+    fix: texto(b.fix, 20),
+    servidor: texto(b.servidor, 20),
+    fecha_planeada: fecha && /^\d{4}-\d{2}-\d{2}$/.test(fecha) ? fecha : null,
+    estado: ESTADOS_INSTANCIA.includes(b.estado) ? b.estado : 'Pendiente',
+    notas: texto(b.notas, 500)
+  };
+};
+
+const SELECT_INSTANCIAS = `
+  SELECT id, puerto, instancia, version, ensamblados, fix, servidor,
+         to_char(fecha_planeada, 'YYYY-MM-DD') AS fecha_planeada,
+         estado, notas, updated_at
+  FROM instancias_frog`;
+
+app.get('/api/instancias', async (req, res) => {
+  try {
+    const result = await pool.query(`${SELECT_INSTANCIAS} ORDER BY servidor NULLS LAST, puerto NULLS LAST, instancia`);
+    res.json({
+      fixObjetivo: FIX_OBJETIVO,
+      estados: ESTADOS_INSTANCIA,
+      edicionHabilitada: !!process.env.EDIT_TOKEN,
+      instancias: result.rows
+    });
+  } catch (error) {
+    console.error('Error en /api/instancias:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Para que el dashboard valide la clave antes de mostrar los botones de edición
+app.post('/api/instancias/verificar', requireEditToken, (req, res) => res.json({ ok: true }));
+
+app.post('/api/instancias', requireEditToken, async (req, res) => {
+  try {
+    const i = instanciaDesdeBody(req.body || {});
+    if (!i.instancia) return res.status(400).json({ error: 'El nombre de la instancia es obligatorio' });
+    const result = await pool.query(`
+      INSERT INTO instancias_frog (puerto, instancia, version, ensamblados, fix, servidor, fecha_planeada, estado, notas)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      RETURNING id
+    `, [i.puerto, i.instancia, i.version, i.ensamblados, i.fix, i.servidor, i.fecha_planeada, i.estado, i.notas]);
+    console.log(`🗂️ Instancia agregada: ${i.instancia}`);
+    res.json({ ok: true, id: result.rows[0].id });
+  } catch (error) {
+    const msg = error.code === '23505' ? 'Ya existe esa instancia con ese puerto' : error.message;
+    res.status(error.code === '23505' ? 409 : 500).json({ error: msg });
+  }
+});
+
+app.put('/api/instancias/:id', requireEditToken, async (req, res) => {
+  try {
+    const i = instanciaDesdeBody(req.body || {});
+    if (!i.instancia) return res.status(400).json({ error: 'El nombre de la instancia es obligatorio' });
+    const result = await pool.query(`
+      UPDATE instancias_frog SET
+        puerto = $2, instancia = $3, version = $4, ensamblados = $5, fix = $6,
+        servidor = $7, fecha_planeada = $8, estado = $9, notas = $10, updated_at = NOW()
+      WHERE id = $1
+    `, [parseInt(req.params.id), i.puerto, i.instancia, i.version, i.ensamblados, i.fix,
+        i.servidor, i.fecha_planeada, i.estado, i.notas]);
+    if (result.rowCount === 0) return res.status(404).json({ error: 'No se encontró la instancia' });
+    console.log(`🗂️ Instancia actualizada: ${i.instancia} (fix ${i.fix || '-'}, ${i.estado})`);
+    res.json({ ok: true });
+  } catch (error) {
+    const msg = error.code === '23505' ? 'Ya existe esa instancia con ese puerto' : error.message;
+    res.status(error.code === '23505' ? 409 : 500).json({ error: msg });
+  }
+});
+
+app.delete('/api/instancias/:id', requireEditToken, async (req, res) => {
+  try {
+    const result = await pool.query('DELETE FROM instancias_frog WHERE id = $1 RETURNING instancia', [parseInt(req.params.id)]);
+    if (result.rowCount === 0) return res.status(404).json({ error: 'No se encontró la instancia' });
+    console.log(`🗂️ Instancia eliminada: ${result.rows[0].instancia}`);
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Servir dashboard
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'dashboard.html'));

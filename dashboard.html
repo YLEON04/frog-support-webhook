@@ -1472,6 +1472,289 @@
       margin: 16px 32px 0;
     }
 
+    /* Planeación de instancias */
+    .inst-stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .inst-stat {
+      background: var(--blanco);
+      border: 1px solid var(--linea);
+      border-radius: 12px;
+      padding: 12px 16px;
+    }
+
+    .inst-stat span {
+      display: block;
+      font-size: 12.5px;
+      color: var(--gris);
+    }
+
+    .inst-stat strong {
+      font-family: var(--f-cifra);
+      font-size: 24px;
+      font-weight: 600;
+      color: var(--marino);
+    }
+
+    .inst-stat.meta strong { color: var(--indigo); }
+    .inst-stat.alerta strong { color: var(--rojo); }
+
+    .inst-progress {
+      height: 6px;
+      margin-top: 8px;
+      background: var(--niebla);
+      border-radius: 999px;
+      overflow: hidden;
+    }
+
+    .inst-progress div {
+      height: 100%;
+      background: var(--indigo);
+      border-radius: 999px;
+    }
+
+    .inst-next {
+      background: var(--blanco);
+      border: 1px solid var(--linea);
+      border-radius: 12px;
+      padding: 14px 18px;
+      margin-bottom: 16px;
+    }
+
+    .inst-next h3 {
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+
+    .inst-next ol {
+      list-style: none;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .inst-next li {
+      background: var(--niebla);
+      border-radius: 999px;
+      padding: 6px 12px;
+      font-size: 13px;
+    }
+
+    .inst-next li time {
+      font-family: var(--f-cifra);
+      color: var(--indigo);
+      font-weight: 600;
+      margin-right: 6px;
+    }
+
+    .inst-next li.vencida time { color: var(--rojo); }
+
+    .inst-toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+
+    .inst-toolbar input,
+    .inst-toolbar select {
+      font-family: var(--f-texto);
+      font-size: 13px;
+      color: var(--marino);
+      border: 1px solid var(--linea);
+      border-radius: 999px;
+      padding: 8px 14px;
+      background: var(--blanco);
+    }
+
+    .inst-toolbar input {
+      flex: 1 1 240px;
+      max-width: 340px;
+    }
+
+    .inst-toolbar-spacer {
+      flex: 1;
+    }
+
+    .inst-btn {
+      font-family: var(--f-texto);
+      font-weight: 600;
+      font-size: 12.5px;
+      padding: 8px 16px;
+      border-radius: 999px;
+      border: 1px solid var(--indigo);
+      background: var(--indigo);
+      color: var(--blanco);
+      cursor: pointer;
+    }
+
+    .inst-btn:hover { background: var(--marino); border-color: var(--marino); }
+    .inst-btn.ghost { background: transparent; color: var(--indigo); border-color: var(--lavanda); }
+    .inst-btn.ghost:hover { background: var(--niebla); }
+    .inst-btn.ghost.on { background: var(--niebla); border-color: var(--indigo); }
+    .inst-btn.danger { background: transparent; color: var(--rojo); border-color: #E7B8BB; }
+    .inst-btn.danger:hover { background: #FBECEC; }
+
+    .inst-table-wrap {
+      background: var(--blanco);
+      border: 1px solid var(--linea);
+      border-radius: 14px;
+      overflow-x: auto;
+    }
+
+    .inst-table-wrap table {
+      border: none;
+      border-radius: 0;
+    }
+
+    .inst-table-wrap tr {
+      cursor: default;
+    }
+
+    .inst-table-wrap.editando tbody tr {
+      cursor: pointer;
+    }
+
+    .inst-port {
+      font-family: var(--f-cifra);
+      color: var(--gris);
+    }
+
+    .inst-name {
+      font-weight: 600;
+    }
+
+    .inst-notes {
+      display: block;
+      font-size: 12px;
+      color: var(--gris);
+      font-weight: 400;
+    }
+
+    .fix-pill {
+      display: inline-block;
+      min-width: 52px;
+      text-align: center;
+      font-family: var(--f-cifra);
+      font-weight: 600;
+      font-size: 12.5px;
+      padding: 3px 10px;
+      border-radius: 999px;
+    }
+
+    .fix-meta     { background: var(--indigo); color: var(--blanco); }
+    .fix-verde    { background: #E2F1E9; color: #2B7353; }
+    .fix-amarillo { background: #FBF1DC; color: #8A5A12; }
+    .fix-naranja  { background: #FCE6D6; color: #A4511C; }
+    .fix-rojo     { background: #FBE5E6; color: #A3333A; }
+
+    .estado-chip {
+      display: inline-block;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 3px 10px;
+      border-radius: 999px;
+      white-space: nowrap;
+    }
+
+    .estado-pendiente   { background: var(--niebla); color: var(--gris); }
+    .estado-programada  { background: #E7E6F5; color: var(--indigo); }
+    .estado-en-proceso  { background: #FBF1DC; color: #8A5A12; }
+    .estado-actualizada { background: #E2F1E9; color: #2B7353; }
+
+    .fecha-vencida {
+      color: var(--rojo);
+      font-weight: 600;
+    }
+
+    .inst-date {
+      font-family: var(--f-cifra);
+      white-space: nowrap;
+    }
+
+    .inst-dialog {
+      margin: auto; /* el reset global quita el centrado nativo del dialog */
+      border: none;
+      border-radius: 18px;
+      padding: 26px 28px;
+      width: min(640px, 94vw);
+      color: var(--marino);
+      box-shadow: 0 20px 60px rgba(1, 32, 76, 0.25);
+    }
+
+    .inst-dialog::backdrop {
+      background: rgba(1, 32, 76, 0.45);
+    }
+
+    .inst-dialog h3 {
+      font-size: 19px;
+      font-weight: 600;
+      margin-bottom: 16px;
+    }
+
+    .inst-form-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px 16px;
+    }
+
+    .inst-form-grid label {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      font-size: 12.5px;
+      color: var(--gris);
+    }
+
+    .inst-form-grid .span-2 {
+      grid-column: 1 / -1;
+    }
+
+    .inst-form-grid input,
+    .inst-form-grid select,
+    .inst-form-grid textarea {
+      font-family: var(--f-texto);
+      font-size: 14px;
+      color: var(--marino);
+      border: 1px solid var(--linea);
+      border-radius: 8px;
+      padding: 8px 10px;
+    }
+
+    .inst-form-grid input:focus,
+    .inst-form-grid select:focus,
+    .inst-form-grid textarea:focus {
+      outline: none;
+      border-color: var(--indigo);
+      box-shadow: 0 0 0 3px rgba(45, 59, 137, 0.15);
+    }
+
+    .inst-form-error {
+      color: var(--rojo);
+      font-size: 13px;
+      min-height: 18px;
+      margin-top: 10px;
+    }
+
+    .inst-form-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 8px;
+    }
+
+    @media (max-width: 600px) {
+      .inst-form-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
     /* Accesibilidad */
     button:focus-visible,
     a:focus-visible,
@@ -1603,6 +1886,7 @@
       <button class="tab-btn" data-tab="tab-carga" onclick="showTab('tab-carga')">Carga de trabajo</button>
       <button class="tab-btn" data-tab="tab-rendimiento" onclick="showTab('tab-rendimiento')">Rendimiento</button>
       <button class="tab-btn" data-tab="tab-actualizaciones" onclick="showTab('tab-actualizaciones')">Actualizaciones</button>
+      <button class="tab-btn" data-tab="tab-instancias" onclick="showTab('tab-instancias')">Instancias</button>
       <button class="tab-btn" data-tab="tab-tendencias" onclick="showTab('tab-tendencias')">Tendencias</button>
       <button class="tab-btn" data-tab="tab-distribuciones" onclick="showTab('tab-distribuciones')">Distribuciones</button>
     </div>
@@ -1654,6 +1938,58 @@
         <p class="perf-note">Abiertas y cerradas en los últimos 14 días. Estos tickets tienen su propio umbral de rezago (7 días) y no cuentan en "¿Dónde se van las horas?" ni en la reacción por agente. Clic en una fila para ver su timeline.</p>
       </div>
     </div>
+
+    <div class="tab-panel" id="tab-instancias">
+      <div class="inst-section">
+        <h2 class="section-title">Actualización de instancias <span class="section-hint" id="instMeta">Meta: Fix 1093</span></h2>
+
+        <div class="inst-stats" id="instStats"></div>
+
+        <div class="inst-next" id="instNext"></div>
+
+        <div class="inst-toolbar">
+          <input type="search" id="instSearch" placeholder="Buscar instancia, puerto o ensamblado" oninput="renderInstancias()">
+          <select id="instServidor" onchange="renderInstancias()" aria-label="Servidor">
+            <option value="">Todos los servidores</option>
+          </select>
+          <select id="instEstado" onchange="renderInstancias()" aria-label="Estado">
+            <option value="">Todos los estados</option>
+          </select>
+          <span class="inst-toolbar-spacer"></span>
+          <button class="inst-btn ghost" id="instEditToggle" onclick="toggleEdicionInstancias()">Editar</button>
+          <button class="inst-btn" id="instAddBtn" onclick="abrirInstancia()" hidden>Agregar instancia</button>
+        </div>
+
+        <div class="inst-table-wrap" id="instTable">
+          <div class="loading"><div class="spinner"></div>Cargando instancias...</div>
+        </div>
+        <p class="perf-note" id="instLegend"></p>
+      </div>
+    </div>
+
+    <dialog class="inst-dialog" id="instDialog">
+      <form method="dialog" id="instForm" onsubmit="guardarInstancia(event)">
+        <h3 id="instDialogTitle">Editar instancia</h3>
+        <div class="inst-form-grid">
+          <label>Instancia<input name="instancia" required maxlength="100"></label>
+          <label>Puerto<input name="puerto" type="number" min="0"></label>
+          <label>Servidor<input name="servidor" maxlength="20" placeholder="OVH1"></label>
+          <label>Versión<input name="version" maxlength="30" placeholder="01.00.16"></label>
+          <label>Fix<input name="fix" maxlength="20" placeholder="989 o N/A"></label>
+          <label>Estado<select name="estado"></select></label>
+          <label>Fecha posible de actualización<input name="fecha_planeada" type="date"></label>
+          <label class="span-2">Ensamblados<input name="ensamblados" maxlength="300" placeholder="945, 946, 952"></label>
+          <label class="span-2">Notas<textarea name="notas" rows="2" maxlength="500"></textarea></label>
+        </div>
+        <p class="inst-form-error" id="instFormError"></p>
+        <div class="inst-form-actions">
+          <button type="button" class="inst-btn danger" id="instDeleteBtn" onclick="eliminarInstancia()">Eliminar</button>
+          <span class="inst-toolbar-spacer"></span>
+          <button type="button" class="inst-btn ghost" onclick="document.getElementById('instDialog').close()">Cancelar</button>
+          <button type="submit" class="inst-btn">Guardar</button>
+        </div>
+      </form>
+    </dialog>
 
     <div class="tab-panel" id="tab-tendencias">
     <div class="analysis-section">
@@ -1811,6 +2147,7 @@
           loadAgingChart(),
           loadCarga(),
           loadActualizaciones(),
+          loadInstancias(),
           loadPerformance(params),
           loadTendencia(params),
           loadHorasPorEstado(params),
@@ -2336,7 +2673,14 @@
           return '#3C9A6E'; // Nueva funcionalidad
         };
 
-        const ctx = document.getElementById('impactoInstanciaChart').getContext('2d');
+        // Una fila por instancia: la gráfica crece para que se lean todas las etiquetas
+        const canvas = document.getElementById('impactoInstanciaChart');
+        const contenedor = canvas.closest('.chart-container');
+        const alto = Math.max(350, data.labels.length * 30 + 110);
+        if (contenedor) contenedor.style.height = `${alto}px`;
+        canvas.style.maxHeight = `${alto - 70}px`; // deja espacio para el título
+
+        const ctx = canvas.getContext('2d');
         charts['impactoInstanciaChart'] = new Chart(ctx, {
           type: 'bar',
           data: {
@@ -2352,10 +2696,20 @@
             indexAxis: 'y',
             responsive: true,
             maintainAspectRatio: false,
-            plugins: { legend: { position: 'top' } },
+            interaction: { mode: 'index', axis: 'y', intersect: false },
+            plugins: {
+              legend: { position: 'top' },
+              tooltip: {
+                // Todos los impactos de la instancia en un solo tooltip (sin los que están en 0)
+                filter: (item) => item.raw > 0,
+                callbacks: {
+                  footer: (items) => `Total: ${items.reduce((s, i) => s + i.raw, 0)} tickets`
+                }
+              }
+            },
             scales: {
               x: { stacked: true, beginAtZero: true, ticks: { stepSize: 1 } },
-              y: { stacked: true }
+              y: { stacked: true, ticks: { autoSkip: false } }
             },
             onClick: (event, elements) => {
               if (elements.length > 0) {
@@ -2510,6 +2864,214 @@
 
       } catch (error) {
         console.error('Error cargando actualizaciones:', error);
+      }
+    }
+
+    // ===== Planeación de actualización de instancias =====
+    let instData = { instancias: [], estados: [], fixObjetivo: 1093, edicionHabilitada: false };
+    let instEditando = false;
+    let instActualId = null;
+
+    const getEditToken = () => { try { return sessionStorage.getItem('cauEditToken') || ''; } catch (e) { return ''; } };
+    const setEditToken = (t) => { try { t ? sessionStorage.setItem('cauEditToken', t) : sessionStorage.removeItem('cauEditToken'); } catch (e) {} };
+
+    const escapeHtml = (txt) => (txt === null || txt === undefined ? '' : String(txt))
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+    const hoyISO = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
+    const fmtFechaCorta = (iso) => iso ? new Date(iso + 'T12:00:00').toLocaleDateString('es-MX', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+
+    // Nivel del fix, con los mismos rangos de la hoja de planeación
+    function nivelFix(fix) {
+      const n = parseInt(fix);
+      if (Number.isNaN(n)) return 'rojo';
+      if (n >= instData.fixObjetivo) return 'meta';
+      if (n >= 900) return 'verde';
+      if (n > 800) return 'amarillo';
+      if (n >= 600) return 'naranja';
+      return 'rojo';
+    }
+
+    const estadoClase = (e) => 'estado-' + (e || 'Pendiente').toLowerCase().replace(/\s+/g, '-');
+    const estaVencida = (i) => i.fecha_planeada && i.estado !== 'Actualizada' && i.fecha_planeada < hoyISO();
+
+    async function loadInstancias() {
+      try {
+        const response = await fetch('/api/instancias');
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+        instData = data;
+
+        document.getElementById('instMeta').textContent = `Meta: Fix ${data.fixObjetivo}`;
+
+        // Opciones de filtros (se arman una sola vez)
+        const selServ = document.getElementById('instServidor');
+        const servidores = [...new Set(data.instancias.map(i => i.servidor).filter(Boolean))].sort();
+        selServ.innerHTML = '<option value="">Todos los servidores</option>' + servidores.map(s => `<option>${escapeHtml(s)}</option>`).join('');
+        const selEst = document.getElementById('instEstado');
+        selEst.innerHTML = '<option value="">Todos los estados</option><option value="__vencidas">Con fecha vencida</option>' +
+          data.estados.map(e => `<option>${e}</option>`).join('');
+        document.querySelector('#instForm select[name="estado"]').innerHTML = data.estados.map(e => `<option>${e}</option>`).join('');
+
+        renderInstancias();
+      } catch (error) {
+        const msg = /relation .*instancias_frog.* does not exist/.test(error.message)
+          ? 'Falta crear la tabla de instancias: corre el archivo instancias.sql en Supabase.'
+          : `No se pudieron cargar las instancias: ${escapeHtml(error.message)}`;
+        document.getElementById('instTable').innerHTML = `<div class="empty-state"><img src="${EMMA_CIRCULO}" alt="Emma"><div><strong>Sin datos de instancias</strong><p>${msg}</p></div></div>`;
+        console.error('Error cargando instancias:', error);
+      }
+    }
+
+    function renderInstancias() {
+      const todas = instData.instancias || [];
+      const objetivo = instData.fixObjetivo;
+
+      // Resumen
+      const actualizadas = todas.filter(i => i.estado === 'Actualizada' || nivelFix(i.fix) === 'meta').length;
+      const programadas = todas.filter(i => i.estado === 'Programada').length;
+      const enProceso = todas.filter(i => i.estado === 'En proceso').length;
+      const vencidas = todas.filter(estaVencida).length;
+      const sinFecha = todas.filter(i => !i.fecha_planeada && i.estado !== 'Actualizada').length;
+      const pct = todas.length ? Math.round(actualizadas / todas.length * 100) : 0;
+      document.getElementById('instStats').innerHTML = `
+        <div class="inst-stat meta"><span>Actualizadas a Fix ${objetivo}</span><strong>${actualizadas} / ${todas.length}</strong>
+          <div class="inst-progress"><div style="width:${pct}%"></div></div></div>
+        <div class="inst-stat"><span>Programadas</span><strong>${programadas}</strong></div>
+        <div class="inst-stat"><span>En proceso</span><strong>${enProceso}</strong></div>
+        <div class="inst-stat ${vencidas ? 'alerta' : ''}"><span>Fecha vencida</span><strong>${vencidas}</strong></div>
+        <div class="inst-stat"><span>Sin fecha planeada</span><strong>${sinFecha}</strong></div>`;
+
+      // Próximas actualizaciones (las vencidas primero)
+      const proximas = todas.filter(i => i.fecha_planeada && i.estado !== 'Actualizada')
+        .sort((a, b) => a.fecha_planeada.localeCompare(b.fecha_planeada)).slice(0, 8);
+      document.getElementById('instNext').innerHTML = proximas.length
+        ? `<h3>Próximas actualizaciones</h3><ol>${proximas.map(i =>
+            `<li class="${estaVencida(i) ? 'vencida' : ''}"><time datetime="${i.fecha_planeada}">${fmtFechaCorta(i.fecha_planeada)}</time>${escapeHtml(i.instancia)}${i.puerto ? ` <span class="inst-port">${i.puerto}</span>` : ''}</li>`).join('')}</ol>`
+        : `<h3>Próximas actualizaciones</h3><p class="perf-note">Aún no hay fechas planeadas. Usa Editar para asignar la fecha posible de cada instancia.</p>`;
+
+      // Filtros
+      const q = document.getElementById('instSearch').value.trim().toLowerCase();
+      const serv = document.getElementById('instServidor').value;
+      const est = document.getElementById('instEstado').value;
+      const lista = todas.filter(i => {
+        if (serv && i.servidor !== serv) return false;
+        if (est === '__vencidas' && !estaVencida(i)) return false;
+        if (est && est !== '__vencidas' && i.estado !== est) return false;
+        if (q) {
+          const texto = `${i.instancia} ${i.puerto || ''} ${i.ensamblados || ''} ${i.notas || ''}`.toLowerCase();
+          if (!texto.includes(q)) return false;
+        }
+        return true;
+      });
+
+      const wrap = document.getElementById('instTable');
+      wrap.classList.toggle('editando', instEditando);
+      if (!lista.length) {
+        wrap.innerHTML = '<p style="padding:20px;color:var(--gris);">No hay instancias que coincidan con el filtro.</p>';
+      } else {
+        wrap.innerHTML = `<table><thead><tr>
+            <th>Puerto</th><th>Instancia</th><th>Versión</th><th>Ensamblados</th><th>Fix</th>
+            <th>Servidor</th><th>Fecha posible</th><th>Estado</th>
+          </tr></thead><tbody>${lista.map(i => `
+          <tr data-inst-id="${i.id}" ${instEditando ? `onclick="abrirInstancia(${i.id})" title="Editar ${escapeHtml(i.instancia)}"` : ''}>
+            <td class="inst-port">${escapeHtml(i.puerto)}</td>
+            <td class="inst-name">${escapeHtml(i.instancia)}${i.notas ? `<span class="inst-notes">${escapeHtml(i.notas)}</span>` : ''}</td>
+            <td class="inst-port">${escapeHtml(i.version)}</td>
+            <td>${escapeHtml(i.ensamblados) || '<span style="color:var(--gris)">-</span>'}</td>
+            <td><span class="fix-pill fix-${nivelFix(i.fix)}">${escapeHtml(i.fix) || 'N/A'}</span></td>
+            <td>${escapeHtml(i.servidor) || '-'}</td>
+            <td class="inst-date ${estaVencida(i) ? 'fecha-vencida' : ''}">${i.fecha_planeada ? fmtFechaCorta(i.fecha_planeada) : '<span style="color:var(--gris);font-family:var(--f-texto)">Sin fecha</span>'}</td>
+            <td><span class="estado-chip ${estadoClase(i.estado)}">${escapeHtml(i.estado)}</span></td>
+          </tr>`).join('')}</tbody></table>`;
+      }
+
+      document.getElementById('instLegend').innerHTML =
+        `Fix: <span class="fix-pill fix-meta">${objetivo}+</span> meta · <span class="fix-pill fix-verde">900+</span> · <span class="fix-pill fix-amarillo">801–899</span> · <span class="fix-pill fix-naranja">600–800</span> · <span class="fix-pill fix-rojo">&lt;600 / N/A</span>` +
+        (instEditando ? ' · Haz clic en una fila para editarla.' : '');
+    }
+
+    async function toggleEdicionInstancias() {
+      const btn = document.getElementById('instEditToggle');
+      if (instEditando) {
+        instEditando = false;
+      } else {
+        if (!instData.edicionHabilitada) {
+          alert('La edición no está habilitada. Agrega la variable EDIT_TOKEN en Render con la clave que quieras usar.');
+          return;
+        }
+        let token = getEditToken();
+        if (!token) {
+          token = prompt('Clave de edición:');
+          if (!token) return;
+        }
+        const r = await fetch('/api/instancias/verificar', { method: 'POST', headers: { 'x-edit-token': token } });
+        if (!r.ok) {
+          setEditToken('');
+          alert('Clave incorrecta.');
+          return;
+        }
+        setEditToken(token);
+        instEditando = true;
+      }
+      btn.textContent = instEditando ? 'Terminar edición' : 'Editar';
+      btn.classList.toggle('on', instEditando);
+      document.getElementById('instAddBtn').hidden = !instEditando;
+      renderInstancias();
+    }
+
+    function abrirInstancia(id) {
+      if (!instEditando) return;
+      const form = document.getElementById('instForm');
+      const inst = id ? instData.instancias.find(i => i.id === id) : null;
+      instActualId = inst ? inst.id : null;
+      form.reset();
+      ['instancia', 'puerto', 'servidor', 'version', 'fix', 'fecha_planeada', 'ensamblados', 'notas'].forEach(campo => {
+        form.elements[campo].value = inst && inst[campo] !== null && inst[campo] !== undefined ? inst[campo] : '';
+      });
+      form.elements.estado.value = inst ? inst.estado : 'Pendiente';
+      if (!inst) form.elements.version.value = '01.00.16';
+      document.getElementById('instDialogTitle').textContent = inst
+        ? `Editar ${inst.instancia}${inst.puerto ? ` (puerto ${inst.puerto})` : ''}`
+        : 'Agregar instancia';
+      document.getElementById('instDeleteBtn').hidden = !inst;
+      document.getElementById('instFormError').textContent = '';
+      document.getElementById('instDialog').showModal();
+    }
+
+    async function guardarInstancia(event) {
+      event.preventDefault();
+      const form = document.getElementById('instForm');
+      const body = Object.fromEntries(new FormData(form).entries());
+      const url = instActualId ? `/api/instancias/${instActualId}` : '/api/instancias';
+      try {
+        const r = await fetch(url, {
+          method: instActualId ? 'PUT' : 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-edit-token': getEditToken() },
+          body: JSON.stringify(body)
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+        document.getElementById('instDialog').close();
+        await loadInstancias();
+      } catch (error) {
+        document.getElementById('instFormError').textContent = `No se guardó: ${error.message}`;
+      }
+    }
+
+    async function eliminarInstancia() {
+      if (!instActualId) return;
+      const inst = instData.instancias.find(i => i.id === instActualId);
+      const nombre = inst ? `${inst.instancia}${inst.puerto ? ` (puerto ${inst.puerto})` : ''}` : 'esta instancia';
+      if (!confirm(`¿Eliminar ${nombre} de la planeación?`)) return;
+      try {
+        const r = await fetch(`/api/instancias/${instActualId}`, { method: 'DELETE', headers: { 'x-edit-token': getEditToken() } });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+        document.getElementById('instDialog').close();
+        await loadInstancias();
+      } catch (error) {
+        document.getElementById('instFormError').textContent = `No se eliminó: ${error.message}`;
       }
     }
 
