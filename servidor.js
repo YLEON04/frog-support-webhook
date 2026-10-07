@@ -1062,11 +1062,13 @@ app.get('/api/actualizaciones', async (req, res) => {
 // ===== SLA DE RESPUESTA Y DE RESOLUCIÓN =====
 // Política de Frog ADN (respuesta): Stopper 4 h · Issue 24 h · Nice To Have 72 h · Nueva funcionalidad sin SLA
 //   "Respuesta" = el ticket sale de "Sin asignar" (alguien lo toma).
-// Resolución: Stopper 24 h · Issue 5 días · Nice To Have 15 días · Nueva funcionalidad sin SLA
-//   "Resolución" = desde la creación hasta Cerrado, con el reloj en pausa mientras el ticket está "Con cliente".
+// Resolución (contrato con el cliente): Stopper 4 h · Issue 24 h · Nice To Have 72 h · Nueva funcionalidad sin SLA
+//   SLA cliente = desde la creación hasta Cerrado, con el reloj en pausa mientras el ticket está "Con cliente".
+//   OLA CAU     = lo mismo, pero también en pausa mientras está en otras áreas (programación, validación...).
+//                 Mide solo el tiempo que depende del CAU.
 // Horas naturales. El filtro de fechas aplica sobre la fecha de CREACIÓN del ticket.
 const SLA_HORAS = { 'stopper': 4, 'issue': 24, 'nice to have': 72, 'nueva funcionalidad': null };
-const SLA_RESOLUCION_HORAS = { 'stopper': 24, 'issue': 120, 'nice to have': 360, 'nueva funcionalidad': null };
+const SLA_RESOLUCION_HORAS = { 'stopper': 4, 'issue': 24, 'nice to have': 72, 'nueva funcionalidad': null };
 const SLA_EN_RIESGO = 0.75; // un ticket abierto está "en riesgo" al consumir el 75% de su meta
 
 app.get('/api/sla', async (req, res) => {
@@ -1130,7 +1132,7 @@ app.get('/api/sla', async (req, res) => {
       const impacto = imps[0] || issue || { name: 'Issue' };
       const clave = normalizeTxt(impacto.name);
       const metaHoras = Object.prototype.hasOwnProperty.call(SLA_HORAS, clave) ? SLA_HORAS[clave] : 24;
-      const metaResolucion = Object.prototype.hasOwnProperty.call(SLA_RESOLUCION_HORAS, clave) ? SLA_RESOLUCION_HORAS[clave] : 120;
+      const metaResolucion = Object.prototype.hasOwnProperty.call(SLA_RESOLUCION_HORAS, clave) ? SLA_RESOLUCION_HORAS[clave] : 24;
 
       const creado = new Date(t.date_created);
       const h = historial[t.ticket_id] || [];
@@ -1160,16 +1162,20 @@ app.get('/api/sla', async (req, res) => {
       let horasOtras = null;
       let horasCliente = null;
       let resultadoRes;
+      let resultadoOla;
       if (metaResolucion === null) {
         resultadoRes = 'sin_sla';
+        resultadoOla = 'sin_sla';
       } else if (!h.length && sigueSinAsignar && !cerrado) {
         // Nunca se ha tomado: todo el tiempo desde la creación cuenta como espera del CAU
         const horas = Math.max(0, (now - creado) / HORA);
         horasCAU = redondear(horas); horasOtras = 0; horasCliente = 0;
         resolucionHoras = redondear(horas);
         resultadoRes = clasificarAbierto(horas, metaResolucion);
+        resultadoOla = resultadoRes;
       } else if (!h.length) {
         resultadoRes = 'sin_datos';
+        resultadoOla = 'sin_datos';
       } else {
         // Tramos: [creación → primer cambio] con el estado inicial, y luego uno por cada cambio
         const tramos = [{ estado: h[0].prev_name || 'Sin asignar', inicio: creado, fin: new Date(h[0].changed_at) }];
@@ -1197,6 +1203,10 @@ app.get('/api/sla', async (req, res) => {
         resultadoRes = cerrado
           ? (efectivas <= metaResolucion ? 'cumplido' : 'incumplido')
           : clasificarAbierto(efectivas, metaResolucion);
+        // OLA del CAU: solo el tiempo en Sin asignar y CAU
+        resultadoOla = cerrado
+          ? (acumulado.cau <= metaResolucion ? 'cumplido' : 'incumplido')
+          : clasificarAbierto(acumulado.cau, metaResolucion);
       }
 
       const agentes = (t.assigned_agent ? t.assigned_agent.toString().split('|') : [])
@@ -1221,7 +1231,8 @@ app.get('/api/sla', async (req, res) => {
         horasCAU,
         horasOtras,
         horasCliente,
-        resultadoRes
+        resultadoRes,
+        resultadoOla
       };
     });
 
@@ -1258,6 +1269,7 @@ app.get('/api/sla', async (req, res) => {
 
     const respuesta = construir('resultado', 'respuestaHoras', t => !t.pendiente);
     const resolucion = construir('resultadoRes', 'resolucionHoras', t => t.cerrado);
+    const ola = construir('resultadoOla', 'horasCAU', t => t.cerrado);
 
     res.json({
       metas: SLA_HORAS,
@@ -1274,6 +1286,14 @@ app.get('/api/sla', async (req, res) => {
         abiertos: tickets.filter(t => !t.cerrado && ['en_tiempo', 'en_riesgo', 'incumplido'].includes(t.resultadoRes))
           .sort((a, b) => (b.resolucionHoras / b.metaResolucion) - (a.resolucionHoras / a.metaResolucion)),
         incumplidos: tickets.filter(t => t.cerrado && t.resultadoRes === 'incumplido')
+          .sort((a, b) => b.id - a.id).slice(0, 30)
+      },
+      // OLA del CAU (resolución sin contar cliente ni otras áreas)
+      ola: {
+        ...ola,
+        abiertos: tickets.filter(t => !t.cerrado && ['en_tiempo', 'en_riesgo', 'incumplido'].includes(t.resultadoOla))
+          .sort((a, b) => (b.horasCAU / b.metaResolucion) - (a.horasCAU / a.metaResolucion)),
+        incumplidos: tickets.filter(t => t.cerrado && t.resultadoOla === 'incumplido')
           .sort((a, b) => b.id - a.id).slice(0, 30)
       }
     });

@@ -2130,7 +2130,8 @@
           <h2 class="section-title">Cumplimiento de SLA <span class="section-hint">Según el impacto · tickets creados en el periodo</span></h2>
           <div class="sla-switch" role="tablist" aria-label="Tipo de SLA">
             <button class="sla-switch-btn active" data-sla="respuesta" onclick="setModoSLA('respuesta')">Respuesta</button>
-            <button class="sla-switch-btn" data-sla="resolucion" onclick="setModoSLA('resolucion')">Resolución</button>
+            <button class="sla-switch-btn" data-sla="resolucion" onclick="setModoSLA('resolucion')">Resolución (cliente)</button>
+            <button class="sla-switch-btn" data-sla="ola" onclick="setModoSLA('ola')">Resolución CAU</button>
           </div>
         </div>
         <div class="sla-top">
@@ -3371,8 +3372,10 @@
 
     function renderSLA() {
       if (!slaData) return;
-      const esRes = slaModo === 'resolucion';
-      const bloque = esRes ? slaData.resolucion : slaData;
+      const esOla = slaModo === 'ola';
+      const esRes = slaModo === 'resolucion' || esOla;
+      const bloque = esOla ? slaData.ola : (esRes ? slaData.resolucion : slaData);
+      const resultadoDe = (t) => esOla ? t.resultadoOla : (esRes ? t.resultadoRes : t.resultado);
       const g = bloque.general;
 
       const link = (t) => `<a class="sc-link" href="${scTicketLink(t.id)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">#${t.id} ↗</a>`;
@@ -3382,15 +3385,14 @@
       // Indicador general
       const pctTxt = g.porcentaje === null ? '—' : `${g.porcentaje}%`;
       document.getElementById('slaGauge').innerHTML = `
-        <span class="label">${esRes ? 'Cumplimiento de resolución' : 'Cumplimiento de respuesta'}</span>
+        <span class="label">${esOla ? 'Resolución CAU (OLA)' : (esRes ? 'Resolución según contrato' : 'Cumplimiento de respuesta')}</span>
         <span class="pct">${pctTxt}</span>
         <span class="detalle"><b>${g.cumplido}</b> en tiempo · <b>${g.incumplido}</b> fuera de tiempo</span>
         <span class="detalle">${esRes ? 'Resolución' : 'Respuesta'} promedio: <b>${fmtHoras(g.promedioHoras)}</b></span>`;
 
       // Tarjetas por impacto
-      const metas = esRes
-        ? [{ nombre: 'Stopper', meta: '24 horas' }, { nombre: 'Issue', meta: '5 días' }, { nombre: 'Nice To Have', meta: '15 días' }, { nombre: 'Nueva funcionalidad', meta: 'Según análisis' }]
-        : [{ nombre: 'Stopper', meta: '4 horas' }, { nombre: 'Issue', meta: '24 horas' }, { nombre: 'Nice To Have', meta: '72 horas' }, { nombre: 'Nueva funcionalidad', meta: 'Según análisis' }];
+      // Mismas metas del contrato para respuesta y resolución
+      const metas = [{ nombre: 'Stopper', meta: '4 horas' }, { nombre: 'Issue', meta: '24 horas' }, { nombre: 'Nice To Have', meta: '72 horas' }, { nombre: 'Nueva funcionalidad', meta: 'Según análisis' }];
       document.getElementById('slaMetas').innerHTML = metas.map(m => {
         const r = bloque.porImpacto.find(x => x.nombre.toLowerCase() === m.nombre.toLowerCase());
         const clase = m.nombre.toLowerCase().replace(/\s+/g, '-');
@@ -3409,23 +3411,24 @@
 
       // Bloque de pendientes: sin tomar (respuesta) o abiertos (resolución)
       const pend = esRes ? bloque.abiertos : slaData.pendientes;
-      const horasDe = (t) => esRes ? t.resolucionHoras : t.respuestaHoras;
+      const horasDe = (t) => esOla ? t.horasCAU : (esRes ? t.resolucionHoras : t.respuestaHoras);
       const metaDe = (t) => esRes ? t.metaResolucion : t.metaHoras;
       document.getElementById('slaPendTitulo').firstChild.textContent = esRes ? 'Abiertos contra su meta de resolución ' : 'Sin tomar ahora ';
       document.getElementById('slaPendInfo').textContent = pend.length
-        ? (esRes ? `${pend.length} tickets abiertos · el reloj no corre mientras están con el cliente` : `${pend.length} tickets esperando que alguien los tome`)
+        ? (esOla ? `${pend.length} tickets abiertos · solo cuenta el tiempo en CAU`
+          : (esRes ? `${pend.length} tickets abiertos · el reloj no corre mientras están con el cliente` : `${pend.length} tickets esperando que alguien los tome`))
         : '';
       document.getElementById('slaPendientes').innerHTML = pend.length
-        ? `<table><thead><tr><th>Ticket</th><th>Asunto</th><th>Instancia</th><th>Impacto</th>${esRes ? '<th>Estado</th><th>Agente</th>' : ''}<th>${esRes ? 'Tiempo efectivo' : 'Esperando'}</th><th>Meta</th><th>Situación</th></tr></thead><tbody>${pend.map(t => {
+        ? `<table><thead><tr><th>Ticket</th><th>Asunto</th><th>Instancia</th><th>Impacto</th>${esRes ? '<th>Estado</th><th>Agente</th>' : ''}<th>${esOla ? 'Tiempo CAU' : (esRes ? 'Tiempo efectivo' : 'Esperando')}</th><th>Meta</th><th>Situación</th></tr></thead><tbody>${pend.map(t => {
             const restante = metaDe(t) - horasDe(t);
-            const chip = (esRes ? t.resultadoRes : t.resultado) === 'incumplido'
+            const chip = resultadoDe(t) === 'incumplido'
               ? `<span class="sla-chip vencido">Vencido hace ${fmtHoras(-restante)}</span>`
-              : `<span class="sla-chip ${(esRes ? t.resultadoRes : t.resultado) === 'en_riesgo' ? 'riesgo' : 'tiempo'}">Quedan ${fmtHoras(restante)}</span>`;
+              : `<span class="sla-chip ${resultadoDe(t) === 'en_riesgo' ? 'riesgo' : 'tiempo'}">Quedan ${fmtHoras(restante)}</span>`;
             return `<tr onclick="openTimeline(${t.id})">
               <td class="ticket-id">${link(t)}</td>
               <td>${escapeHtml(t.subject)}</td><td>${escapeHtml(t.instance)}</td><td>${escapeHtml(t.impacto)}</td>
               ${esRes ? `<td>${escapeHtml(t.status)}</td><td>${escapeHtml(t.agentes.join(', ') || 'Sin asignar')}</td>` : ''}
-              <td class="sla-time">${fmtHoras(horasDe(t))}${esRes ? dividido(t) : ''}</td><td class="sla-time">${fmtHoras(metaDe(t))}</td><td>${chip}</td></tr>`;
+              <td class="sla-time">${fmtHoras(horasDe(t))}${esRes ? dividido(t) : ''}</td><td class="sla-time">${metaDe(t)} h</td><td>${chip}</td></tr>`;
           }).join('')}</tbody></table>`
         : (esRes
           ? emptyState('Nada abierto', 'Todos los tickets del periodo ya se cerraron.')
@@ -3473,7 +3476,8 @@
 
       // Incumplidos (terminados fuera de tiempo)
       const inc = bloque.incumplidos || [];
-      document.getElementById('slaIncTitulo').textContent = esRes ? 'Tickets cerrados fuera de su meta de resolución' : 'Tickets tomados fuera de su meta de respuesta';
+      document.getElementById('slaIncTitulo').textContent = esOla ? 'Tickets cerrados con más tiempo en CAU que su meta'
+        : (esRes ? 'Tickets cerrados fuera de su meta de resolución' : 'Tickets tomados fuera de su meta de respuesta');
       document.getElementById('slaIncInfo').textContent = `(${inc.length})`;
       document.getElementById('slaIncumplidos').innerHTML = inc.length
         ? `<table><thead><tr><th>Ticket</th><th>Asunto</th><th>Instancia</th><th>Impacto</th><th>Agente</th><th>${esRes ? 'Resolución' : 'Respuesta'}</th><th>Meta</th></tr></thead><tbody>${inc.map(t =>
@@ -3481,12 +3485,14 @@
               <td class="ticket-id">${link(t)}</td>
               <td>${escapeHtml(t.subject)}</td><td>${escapeHtml(t.instance)}</td><td>${escapeHtml(t.impacto)}</td>
               <td>${escapeHtml(t.agentes.join(', ') || 'Sin asignar')}</td>
-              <td class="sla-time sla-bad">${fmtHoras(horasDe(t))}${esRes ? dividido(t) : ''}</td><td class="sla-time">${fmtHoras(metaDe(t))}</td></tr>`).join('')}</tbody></table>`
+              <td class="sla-time sla-bad">${fmtHoras(horasDe(t))}${esRes ? dividido(t) : ''}</td><td class="sla-time">${metaDe(t)} h</td></tr>`).join('')}</tbody></table>`
         : `<p class="perf-note">Ningún ticket ${esRes ? 'cerrado' : 'tomado'} fuera de tiempo en el periodo.</p>`;
 
       // Nota de cómo se mide
-      document.getElementById('slaNota').textContent = esRes
-        ? 'Resolución = desde la creación hasta Cerrado. El reloj se pausa mientras el ticket está "Con cliente"; el tiempo en programación, validación y otras áreas sí cuenta. Horas naturales. Stopper 24 h · Issue 5 días · Nice To Have 15 días · Nueva funcionalidad sin SLA. Se usa el impacto más severo; sin impacto se toma como Issue. Los tickets anteriores al histórico aparecen como "sin datos".'
+      document.getElementById('slaNota').textContent = esOla
+        ? 'Resolución CAU (OLA) = solo el tiempo que el ticket pasa en Sin asignar y CAU. El reloj se pausa con el cliente y en otras áreas (programación, validación, consultoría, ventas). Mide el desempeño del equipo contra las metas del contrato: Stopper 4 h · Issue 24 h · Nice To Have 72 h. Horas naturales.'
+        : esRes
+        ? 'Resolución según contrato = desde la creación hasta Cerrado, como lo vive el cliente. El reloj solo se pausa mientras el ticket está "Con cliente"; el tiempo en programación, validación y otras áreas sí cuenta. Horas naturales. Stopper 4 h · Issue 24 h · Nice To Have 72 h · Nueva funcionalidad sin SLA. Se usa el impacto más severo; sin impacto se toma como Issue. Los tickets anteriores al histórico aparecen como "sin datos".'
         : 'Respuesta = cuando el ticket sale de "Sin asignar" (alguien lo toma). Horas naturales. Stopper 4 h · Issue 24 h · Nice To Have 72 h · Nueva funcionalidad sin SLA (según análisis y cotización). Se usa el impacto más severo; sin impacto se toma como Issue. Los tickets anteriores al histórico aparecen como "sin datos".';
     }
 
