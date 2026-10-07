@@ -1489,6 +1489,46 @@
     .prio-otra    { background: var(--niebla); color: var(--gris); }
 
     /* SLA */
+    .sla-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .sla-switch {
+      display: inline-flex;
+      background: var(--blanco);
+      border: 1px solid var(--linea);
+      border-radius: 999px;
+      padding: 3px;
+    }
+
+    .sla-switch-btn {
+      border: none;
+      background: transparent;
+      color: var(--gris);
+      font-family: var(--f-texto);
+      font-weight: 600;
+      font-size: 13px;
+      padding: 7px 18px;
+      border-radius: 999px;
+      cursor: pointer;
+    }
+
+    .sla-switch-btn.active {
+      background: var(--indigo);
+      color: var(--blanco);
+    }
+
+    .sla-split {
+      display: block;
+      font-size: 11.5px;
+      color: var(--gris);
+      font-family: var(--f-texto);
+    }
+
     .sla-top {
       display: grid;
       grid-template-columns: 260px 1fr;
@@ -2086,14 +2126,20 @@
 
     <div class="tab-panel" id="tab-sla">
       <div class="sla-section">
-        <h2 class="section-title">Cumplimiento de SLA <span class="section-hint">Tiempo de respuesta según el impacto · tickets creados en el periodo</span></h2>
+        <div class="sla-head">
+          <h2 class="section-title">Cumplimiento de SLA <span class="section-hint">Según el impacto · tickets creados en el periodo</span></h2>
+          <div class="sla-switch" role="tablist" aria-label="Tipo de SLA">
+            <button class="sla-switch-btn active" data-sla="respuesta" onclick="setModoSLA('respuesta')">Respuesta</button>
+            <button class="sla-switch-btn" data-sla="resolucion" onclick="setModoSLA('resolucion')">Resolución</button>
+          </div>
+        </div>
         <div class="sla-top">
           <div class="sla-gauge" id="slaGauge"></div>
           <div class="sla-metas" id="slaMetas"></div>
         </div>
 
         <div class="sla-block">
-          <h3>Sin tomar ahora <span class="analysis-info" id="slaPendInfo"></span></h3>
+          <h3 id="slaPendTitulo">Sin tomar ahora <span class="analysis-info" id="slaPendInfo"></span></h3>
           <div id="slaPendientes"></div>
         </div>
 
@@ -2109,11 +2155,11 @@
         </div>
 
         <details class="sla-block sla-details">
-          <summary>Tickets que no cumplieron el SLA <span class="analysis-info" id="slaIncInfo"></span></summary>
+          <summary><span id="slaIncTitulo">Tickets que no cumplieron el SLA</span> <span class="analysis-info" id="slaIncInfo"></span></summary>
           <div id="slaIncumplidos"></div>
         </details>
 
-        <p class="perf-note">Respuesta = cuando el ticket sale de "Sin asignar" (alguien lo toma). Horas naturales. Stopper 4 h · Issue 24 h · Nice To Have 72 h · Nueva funcionalidad sin SLA (según análisis y cotización). Si un ticket tiene varios impactos se usa el más severo; sin impacto se toma como Issue. Los tickets anteriores al histórico aparecen como "sin datos".</p>
+        <p class="perf-note" id="slaNota"></p>
       </div>
     </div>
 
@@ -3301,117 +3347,147 @@
       return `${Math.round(h * 10) / 10} h`;
     };
 
+    let slaData = null;
+    let slaModo = 'respuesta';
+
+    function setModoSLA(modo) {
+      slaModo = modo;
+      document.querySelectorAll('.sla-switch-btn').forEach(b => b.classList.toggle('active', b.dataset.sla === modo));
+      renderSLA();
+    }
+
     async function loadSLA(params) {
       try {
         const response = await fetch(`/api/sla?${params}`);
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
-        const g = data.general;
-
-        // Indicador general
-        const pctTxt = g.porcentaje === null ? '—' : `${g.porcentaje}%`;
-        document.getElementById('slaGauge').innerHTML = `
-          <span class="label">Cumplimiento de SLA</span>
-          <span class="pct">${pctTxt}</span>
-          <span class="detalle"><b>${g.cumplido}</b> en tiempo · <b>${g.incumplido}</b> fuera de tiempo</span>
-          <span class="detalle">Respuesta promedio: <b>${fmtHoras(g.promedioRespuestaHoras)}</b></span>`;
-
-        // Tarjetas por impacto (en el orden de la política)
-        const metas = [
-          { nombre: 'Stopper', meta: '4 horas' },
-          { nombre: 'Issue', meta: '24 horas' },
-          { nombre: 'Nice To Have', meta: '72 horas' },
-          { nombre: 'Nueva funcionalidad', meta: 'Según análisis' }
-        ];
-        document.getElementById('slaMetas').innerHTML = metas.map(m => {
-          const r = data.porImpacto.find(x => x.nombre.toLowerCase() === m.nombre.toLowerCase());
-          const clase = m.nombre.toLowerCase().replace(/\s+/g, '-');
-          if (m.nombre === 'Nueva funcionalidad') {
-            return `<div class="sla-meta ${clase}"><h4>${m.nombre}</h4><span class="meta">Meta: ${m.meta}</span>
-              <div class="valor" style="color:var(--gris);font-size:18px;">Sin SLA</div>
-              <span class="conteo">${r ? r.sin_sla : 0} ${r && r.sin_sla === 1 ? 'ticket' : 'tickets'} · requiere cotización</span></div>`;
-          }
-          const p = r ? r.porcentaje : null;
-          return `<div class="sla-meta ${clase}"><h4>${m.nombre}</h4><span class="meta">Meta: ${m.meta}</span>
-            <div class="valor sla-${slaClase(p)}">${p === null ? '—' : p + '%'}</div>
-            <div class="sla-bar"><div class="sla-bg-${slaClase(p) || 'ok'}" style="width:${p || 0}%"></div></div>
-            <span class="conteo">${r ? `${r.cumplido} de ${r.medidos} en tiempo${r.en_riesgo ? ` · ${r.en_riesgo} en riesgo` : ''}` : 'Sin tickets'}</span></div>`;
-        }).join('');
-
-        // Pendientes de tomar
-        const pend = data.pendientes || [];
-        document.getElementById('slaPendInfo').textContent = pend.length ? `${pend.length} tickets esperando que alguien los tome` : '';
-        document.getElementById('slaPendientes').innerHTML = pend.length
-          ? `<table><thead><tr><th>Ticket</th><th>Asunto</th><th>Instancia</th><th>Impacto</th><th>Esperando</th><th>Meta</th><th>Situación</th></tr></thead><tbody>${pend.map(t => {
-              const restante = t.metaHoras - t.respuestaHoras;
-              const chip = t.resultado === 'incumplido'
-                ? `<span class="sla-chip vencido">Vencido hace ${fmtHoras(-restante)}</span>`
-                : (t.resultado === 'en_riesgo'
-                  ? `<span class="sla-chip riesgo">Quedan ${fmtHoras(restante)}</span>`
-                  : `<span class="sla-chip tiempo">Quedan ${fmtHoras(restante)}</span>`);
-              return `<tr onclick="openTimeline(${t.id})">
-                <td class="ticket-id"><a class="sc-link" href="${scTicketLink(t.id)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">#${t.id} ↗</a></td>
-                <td>${escapeHtml(t.subject)}</td><td>${escapeHtml(t.instance)}</td><td>${escapeHtml(t.impacto)}</td>
-                <td class="sla-time">${fmtHoras(t.respuestaHoras)}</td><td class="sla-time">${t.metaHoras} h</td><td>${chip}</td></tr>`;
-            }).join('')}</tbody></table>`
-          : emptyState('Nada esperando', 'Todos los tickets del periodo ya fueron tomados por alguien del equipo.');
-
-        // Por agente
-        const agentes = data.porAgente.filter(a => a.medidos > 0 && a.nombre !== 'Sin asignar');
-        if (charts['slaAgenteChart']) charts['slaAgenteChart'].destroy();
-        const colorPct = (p) => p >= 90 ? '#3C9A6E' : (p >= 75 ? '#E0A33B' : '#C8434B');
-        charts['slaAgenteChart'] = new Chart(document.getElementById('slaAgenteChart').getContext('2d'), {
-          type: 'bar',
-          data: {
-            labels: agentes.map(a => a.nombre),
-            datasets: [{ label: '% en tiempo', data: agentes.map(a => a.porcentaje), backgroundColor: agentes.map(a => colorPct(a.porcentaje)), borderRadius: 6, minBarLength: 6 }]
-          },
-          options: {
-            indexAxis: 'y',
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-              legend: { display: false },
-              tooltip: { callbacks: {
-                label: (item) => `${item.raw}% en tiempo`,
-                afterLabel: (item) => {
-                  const a = agentes[item.dataIndex];
-                  return [`${a.cumplido} de ${a.medidos} tickets`, `Respuesta promedio: ${fmtHoras(a.promedioRespuestaHoras)}`];
-                }
-              } }
-            },
-            scales: { x: { min: 0, max: 100, ticks: { callback: (v) => v + '%' } } },
-            onClick: (event, elements) => {
-              if (elements.length > 0) filterTicketsByAgent(agentes[elements[0].index].nombre);
-            }
-          }
-        });
-
-        // Instancias con más incumplimientos
-        const inst = data.porInstancia.filter(i => i.incumplido > 0);
-        document.getElementById('slaInstancias').innerHTML = inst.length
-          ? `<table><thead><tr><th>Instancia</th><th>Fuera de tiempo</th><th>Cumplimiento</th></tr></thead><tbody>${inst.map(i =>
-              `<tr onclick="filterTicketsByInstance('${escapeHtml(i.nombre)}')"><td><strong>${escapeHtml(i.nombre)}</strong></td>
-               <td class="sla-time">${i.incumplido} de ${i.medidos}</td>
-               <td class="sla-time sla-${slaClase(i.porcentaje)}">${i.porcentaje}%</td></tr>`).join('')}</tbody></table>`
-          : emptyState('Sin incumplimientos', 'Ninguna instancia tiene tickets fuera de tiempo en el periodo.');
-
-        // Incumplidos (ya tomados, pero tarde)
-        const inc = data.incumplidos || [];
-        document.getElementById('slaIncInfo').textContent = `(${inc.length})`;
-        document.getElementById('slaIncumplidos').innerHTML = inc.length
-          ? `<table><thead><tr><th>Ticket</th><th>Asunto</th><th>Instancia</th><th>Impacto</th><th>Agente</th><th>Respuesta</th><th>Meta</th></tr></thead><tbody>${inc.map(t =>
-              `<tr onclick="openTimeline(${t.id})">
-                <td class="ticket-id"><a class="sc-link" href="${scTicketLink(t.id)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">#${t.id} ↗</a></td>
-                <td>${escapeHtml(t.subject)}</td><td>${escapeHtml(t.instance)}</td><td>${escapeHtml(t.impacto)}</td>
-                <td>${escapeHtml(t.agentes.join(', ') || 'Sin asignar')}</td>
-                <td class="sla-time sla-bad">${fmtHoras(t.respuestaHoras)}</td><td class="sla-time">${t.metaHoras} h</td></tr>`).join('')}</tbody></table>`
-          : '<p class="perf-note">Ningún ticket tomado fuera de tiempo en el periodo.</p>';
-
+        slaData = data;
+        renderSLA();
       } catch (error) {
         console.error('Error cargando SLA:', error);
         document.getElementById('slaGauge').innerHTML = `<span class="label">No se pudo calcular el SLA</span><span class="detalle">${escapeHtml(error.message)}</span>`;
       }
+    }
+
+    function renderSLA() {
+      if (!slaData) return;
+      const esRes = slaModo === 'resolucion';
+      const bloque = esRes ? slaData.resolucion : slaData;
+      const g = bloque.general;
+
+      const link = (t) => `<a class="sc-link" href="${scTicketLink(t.id)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">#${t.id} ↗</a>`;
+      const dividido = (t) => (t.horasCAU === null ? '' :
+        `<span class="sla-split">CAU ${fmtHoras(t.horasCAU)} · otras áreas ${fmtHoras(t.horasOtras)}${t.horasCliente ? ` · cliente ${fmtHoras(t.horasCliente)} (en pausa)` : ''}</span>`);
+
+      // Indicador general
+      const pctTxt = g.porcentaje === null ? '—' : `${g.porcentaje}%`;
+      document.getElementById('slaGauge').innerHTML = `
+        <span class="label">${esRes ? 'Cumplimiento de resolución' : 'Cumplimiento de respuesta'}</span>
+        <span class="pct">${pctTxt}</span>
+        <span class="detalle"><b>${g.cumplido}</b> en tiempo · <b>${g.incumplido}</b> fuera de tiempo</span>
+        <span class="detalle">${esRes ? 'Resolución' : 'Respuesta'} promedio: <b>${fmtHoras(g.promedioHoras)}</b></span>`;
+
+      // Tarjetas por impacto
+      const metas = esRes
+        ? [{ nombre: 'Stopper', meta: '24 horas' }, { nombre: 'Issue', meta: '5 días' }, { nombre: 'Nice To Have', meta: '15 días' }, { nombre: 'Nueva funcionalidad', meta: 'Según análisis' }]
+        : [{ nombre: 'Stopper', meta: '4 horas' }, { nombre: 'Issue', meta: '24 horas' }, { nombre: 'Nice To Have', meta: '72 horas' }, { nombre: 'Nueva funcionalidad', meta: 'Según análisis' }];
+      document.getElementById('slaMetas').innerHTML = metas.map(m => {
+        const r = bloque.porImpacto.find(x => x.nombre.toLowerCase() === m.nombre.toLowerCase());
+        const clase = m.nombre.toLowerCase().replace(/\s+/g, '-');
+        if (m.nombre === 'Nueva funcionalidad') {
+          const n = r ? r.sin_sla : 0;
+          return `<div class="sla-meta ${clase}"><h4>${m.nombre}</h4><span class="meta">Meta: ${m.meta}</span>
+            <div class="valor" style="color:var(--gris);font-size:18px;">Sin SLA</div>
+            <span class="conteo">${n} ${n === 1 ? 'ticket' : 'tickets'} · requiere cotización</span></div>`;
+        }
+        const p = r ? r.porcentaje : null;
+        return `<div class="sla-meta ${clase}"><h4>${m.nombre}</h4><span class="meta">Meta: ${m.meta}</span>
+          <div class="valor sla-${slaClase(p)}">${p === null ? '—' : p + '%'}</div>
+          <div class="sla-bar"><div class="sla-bg-${slaClase(p) || 'ok'}" style="width:${p || 0}%"></div></div>
+          <span class="conteo">${r ? `${r.cumplido} de ${r.medidos} en tiempo${r.en_riesgo ? ` · ${r.en_riesgo} en riesgo` : ''}${esRes && r.en_tiempo ? ` · ${r.en_tiempo} abiertos en tiempo` : ''}` : 'Sin tickets'}</span></div>`;
+      }).join('');
+
+      // Bloque de pendientes: sin tomar (respuesta) o abiertos (resolución)
+      const pend = esRes ? bloque.abiertos : slaData.pendientes;
+      const horasDe = (t) => esRes ? t.resolucionHoras : t.respuestaHoras;
+      const metaDe = (t) => esRes ? t.metaResolucion : t.metaHoras;
+      document.getElementById('slaPendTitulo').firstChild.textContent = esRes ? 'Abiertos contra su meta de resolución ' : 'Sin tomar ahora ';
+      document.getElementById('slaPendInfo').textContent = pend.length
+        ? (esRes ? `${pend.length} tickets abiertos · el reloj no corre mientras están con el cliente` : `${pend.length} tickets esperando que alguien los tome`)
+        : '';
+      document.getElementById('slaPendientes').innerHTML = pend.length
+        ? `<table><thead><tr><th>Ticket</th><th>Asunto</th><th>Instancia</th><th>Impacto</th>${esRes ? '<th>Estado</th><th>Agente</th>' : ''}<th>${esRes ? 'Tiempo efectivo' : 'Esperando'}</th><th>Meta</th><th>Situación</th></tr></thead><tbody>${pend.map(t => {
+            const restante = metaDe(t) - horasDe(t);
+            const chip = (esRes ? t.resultadoRes : t.resultado) === 'incumplido'
+              ? `<span class="sla-chip vencido">Vencido hace ${fmtHoras(-restante)}</span>`
+              : `<span class="sla-chip ${(esRes ? t.resultadoRes : t.resultado) === 'en_riesgo' ? 'riesgo' : 'tiempo'}">Quedan ${fmtHoras(restante)}</span>`;
+            return `<tr onclick="openTimeline(${t.id})">
+              <td class="ticket-id">${link(t)}</td>
+              <td>${escapeHtml(t.subject)}</td><td>${escapeHtml(t.instance)}</td><td>${escapeHtml(t.impacto)}</td>
+              ${esRes ? `<td>${escapeHtml(t.status)}</td><td>${escapeHtml(t.agentes.join(', ') || 'Sin asignar')}</td>` : ''}
+              <td class="sla-time">${fmtHoras(horasDe(t))}${esRes ? dividido(t) : ''}</td><td class="sla-time">${fmtHoras(metaDe(t))}</td><td>${chip}</td></tr>`;
+          }).join('')}</tbody></table>`
+        : (esRes
+          ? emptyState('Nada abierto', 'Todos los tickets del periodo ya se cerraron.')
+          : emptyState('Nada esperando', 'Todos los tickets del periodo ya fueron tomados por alguien del equipo.'));
+
+      // Por agente
+      const agentes = bloque.porAgente.filter(a => a.medidos > 0 && a.nombre !== 'Sin asignar');
+      if (charts['slaAgenteChart']) charts['slaAgenteChart'].destroy();
+      const colorPct = (p) => p >= 90 ? '#3C9A6E' : (p >= 75 ? '#E0A33B' : '#C8434B');
+      charts['slaAgenteChart'] = new Chart(document.getElementById('slaAgenteChart').getContext('2d'), {
+        type: 'bar',
+        data: {
+          labels: agentes.map(a => a.nombre),
+          datasets: [{ label: '% en tiempo', data: agentes.map(a => a.porcentaje), backgroundColor: agentes.map(a => colorPct(a.porcentaje)), borderRadius: 6, minBarLength: 6 }]
+        },
+        options: {
+          indexAxis: 'y',
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: { callbacks: {
+              label: (item) => `${item.raw}% en tiempo`,
+              afterLabel: (item) => {
+                const a = agentes[item.dataIndex];
+                return [`${a.cumplido} de ${a.medidos} tickets`, `${esRes ? 'Resolución' : 'Respuesta'} promedio: ${fmtHoras(a.promedioHoras)}`];
+              }
+            } }
+          },
+          scales: { x: { min: 0, max: 100, ticks: { callback: (v) => v + '%' } } },
+          onClick: (event, elements) => {
+            if (elements.length > 0) filterTicketsByAgent(agentes[elements[0].index].nombre);
+          }
+        }
+      });
+
+      // Instancias con más incumplimientos
+      const inst = bloque.porInstancia.filter(i => i.incumplido > 0);
+      document.getElementById('slaInstancias').innerHTML = inst.length
+        ? `<table><thead><tr><th>Instancia</th><th>Fuera de tiempo</th><th>Cumplimiento</th></tr></thead><tbody>${inst.map(i =>
+            `<tr onclick="filterTicketsByInstance('${escapeHtml(i.nombre)}')"><td><strong>${escapeHtml(i.nombre)}</strong></td>
+             <td class="sla-time">${i.incumplido} de ${i.medidos}</td>
+             <td class="sla-time sla-${slaClase(i.porcentaje)}">${i.porcentaje}%</td></tr>`).join('')}</tbody></table>`
+        : emptyState('Sin incumplimientos', 'Ninguna instancia tiene tickets fuera de tiempo en el periodo.');
+
+      // Incumplidos (terminados fuera de tiempo)
+      const inc = bloque.incumplidos || [];
+      document.getElementById('slaIncTitulo').textContent = esRes ? 'Tickets cerrados fuera de su meta de resolución' : 'Tickets tomados fuera de su meta de respuesta';
+      document.getElementById('slaIncInfo').textContent = `(${inc.length})`;
+      document.getElementById('slaIncumplidos').innerHTML = inc.length
+        ? `<table><thead><tr><th>Ticket</th><th>Asunto</th><th>Instancia</th><th>Impacto</th><th>Agente</th><th>${esRes ? 'Resolución' : 'Respuesta'}</th><th>Meta</th></tr></thead><tbody>${inc.map(t =>
+            `<tr onclick="openTimeline(${t.id})">
+              <td class="ticket-id">${link(t)}</td>
+              <td>${escapeHtml(t.subject)}</td><td>${escapeHtml(t.instance)}</td><td>${escapeHtml(t.impacto)}</td>
+              <td>${escapeHtml(t.agentes.join(', ') || 'Sin asignar')}</td>
+              <td class="sla-time sla-bad">${fmtHoras(horasDe(t))}${esRes ? dividido(t) : ''}</td><td class="sla-time">${fmtHoras(metaDe(t))}</td></tr>`).join('')}</tbody></table>`
+        : `<p class="perf-note">Ningún ticket ${esRes ? 'cerrado' : 'tomado'} fuera de tiempo en el periodo.</p>`;
+
+      // Nota de cómo se mide
+      document.getElementById('slaNota').textContent = esRes
+        ? 'Resolución = desde la creación hasta Cerrado. El reloj se pausa mientras el ticket está "Con cliente"; el tiempo en programación, validación y otras áreas sí cuenta. Horas naturales. Stopper 24 h · Issue 5 días · Nice To Have 15 días · Nueva funcionalidad sin SLA. Se usa el impacto más severo; sin impacto se toma como Issue. Los tickets anteriores al histórico aparecen como "sin datos".'
+        : 'Respuesta = cuando el ticket sale de "Sin asignar" (alguien lo toma). Horas naturales. Stopper 4 h · Issue 24 h · Nice To Have 72 h · Nueva funcionalidad sin SLA (según análisis y cotización). Se usa el impacto más severo; sin impacto se toma como Issue. Los tickets anteriores al histórico aparecen como "sin datos".';
     }
 
     async function loadTickets(params) {

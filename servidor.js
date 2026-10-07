@@ -1059,12 +1059,15 @@ app.get('/api/actualizaciones', async (req, res) => {
   }
 });
 
-// ===== SLA DE RESPUESTA =====
-// Política de Frog ADN: Stopper 4 h · Issue 24 h · Nice To Have 72 h · Nueva funcionalidad sin SLA (según análisis)
-// "Respuesta" = el ticket sale de "Sin asignar" (alguien lo toma). Horas naturales.
-// El filtro de fechas aplica sobre la fecha de CREACIÓN del ticket.
+// ===== SLA DE RESPUESTA Y DE RESOLUCIÓN =====
+// Política de Frog ADN (respuesta): Stopper 4 h · Issue 24 h · Nice To Have 72 h · Nueva funcionalidad sin SLA
+//   "Respuesta" = el ticket sale de "Sin asignar" (alguien lo toma).
+// Resolución: Stopper 24 h · Issue 5 días · Nice To Have 15 días · Nueva funcionalidad sin SLA
+//   "Resolución" = desde la creación hasta Cerrado, con el reloj en pausa mientras el ticket está "Con cliente".
+// Horas naturales. El filtro de fechas aplica sobre la fecha de CREACIÓN del ticket.
 const SLA_HORAS = { 'stopper': 4, 'issue': 24, 'nice to have': 72, 'nueva funcionalidad': null };
-const SLA_EN_RIESGO = 0.75; // un ticket sin tomar está "en riesgo" al consumir el 75% de su meta
+const SLA_RESOLUCION_HORAS = { 'stopper': 24, 'issue': 120, 'nice to have': 360, 'nueva funcionalidad': null };
+const SLA_EN_RIESGO = 0.75; // un ticket abierto está "en riesgo" al consumir el 75% de su meta
 
 app.get('/api/sla', async (req, res) => {
   try {
@@ -1094,17 +1097,20 @@ app.get('/api/sla', async (req, res) => {
       ORDER BY t.ticket_id, t.date_updated DESC
     `);
 
+    // Histórico completo de estados de esos tickets
     const ids = result.rows.map(r => r.ticket_id);
-    const primerCambio = {};
+    const historial = {};
     if (ids.length) {
       const hist = await pool.query(`
-        SELECT DISTINCT ON (tsh.ticket_id) tsh.ticket_id, tsh.changed_at, s_prev.status_name_es AS prev_name
+        SELECT tsh.ticket_id, tsh.changed_at,
+               s_prev.status_name_es AS prev_name, s_new.status_name_es AS new_name
         FROM ticket_state_history tsh
         LEFT JOIN sc_statuses s_prev ON s_prev.status_id = tsh.previous_status
+        LEFT JOIN sc_statuses s_new ON s_new.status_id = tsh.new_status
         WHERE tsh.ticket_id = ANY($1)
         ORDER BY tsh.ticket_id, tsh.changed_at ASC
       `, [ids]);
-      hist.rows.forEach(h => { primerCambio[h.ticket_id] = h; });
+      hist.rows.forEach(h => { (historial[h.ticket_id] = historial[h.ticket_id] || []).push(h); });
     }
 
     const agentsResult = await pool.query('SELECT agent_id, agent_name FROM sc_agents');
@@ -1112,6 +1118,11 @@ app.get('/api/sla', async (req, res) => {
     agentsResult.rows.forEach(a => { agentMap[a.agent_id.toString()] = a.agent_name; });
 
     const now = new Date();
+    const HORA = 3600000;
+    const redondear = (h) => Math.round(h * 10) / 10;
+    const clasificarAbierto = (horas, meta) => horas > meta ? 'incumplido'
+      : (horas >= meta * SLA_EN_RIESGO ? 'en_riesgo' : 'en_tiempo');
+
     const tickets = result.rows.map(t => {
       // Impacto más severo del ticket (el campo es multi-select); sin impacto → Issue (default de Support Candy)
       const ids41 = (t.cust_41 || '').toString().split(/[^0-9]+/).filter(Boolean);
@@ -1119,27 +1130,73 @@ app.get('/api/sla', async (req, res) => {
       const impacto = imps[0] || issue || { name: 'Issue' };
       const clave = normalizeTxt(impacto.name);
       const metaHoras = Object.prototype.hasOwnProperty.call(SLA_HORAS, clave) ? SLA_HORAS[clave] : 24;
+      const metaResolucion = Object.prototype.hasOwnProperty.call(SLA_RESOLUCION_HORAS, clave) ? SLA_RESOLUCION_HORAS[clave] : 120;
 
       const creado = new Date(t.date_created);
-      const h = primerCambio[t.ticket_id];
+      const h = historial[t.ticket_id] || [];
+      const cerrado = estadosEsp.cerrado.has(String(t.status));
       const sigueSinAsignar = grupoEstado(t.status_name_es) === 'espera';
 
+      // --- Respuesta ---
       let respuestaHoras = null;
       let resultado;
       if (metaHoras === null) {
         resultado = 'sin_sla';
-      } else if (h) {
+      } else if (h.length) {
         // Si nació en otro estado (lo creó un agente ya tomado), la respuesta es inmediata
-        respuestaHoras = grupoEstado(h.prev_name || 'Sin asignar') === 'espera'
-          ? Math.max(0, (new Date(h.changed_at) - creado) / 3600000) : 0;
+        respuestaHoras = grupoEstado(h[0].prev_name || 'Sin asignar') === 'espera'
+          ? Math.max(0, (new Date(h[0].changed_at) - creado) / HORA) : 0;
         resultado = respuestaHoras <= metaHoras ? 'cumplido' : 'incumplido';
-      } else if (sigueSinAsignar && !estadosEsp.cerrado.has(String(t.status))) {
-        const transcurridas = Math.max(0, (now - creado) / 3600000);
-        respuestaHoras = transcurridas;
-        resultado = transcurridas > metaHoras ? 'incumplido'
-          : (transcurridas >= metaHoras * SLA_EN_RIESGO ? 'en_riesgo' : 'en_tiempo');
+      } else if (sigueSinAsignar && !cerrado) {
+        respuestaHoras = Math.max(0, (now - creado) / HORA);
+        resultado = clasificarAbierto(respuestaHoras, metaHoras);
       } else {
         resultado = 'sin_datos'; // ticket anterior al histórico
+      }
+
+      // --- Resolución (pausa mientras está "Con cliente") ---
+      let resolucionHoras = null;
+      let horasCAU = null;
+      let horasOtras = null;
+      let horasCliente = null;
+      let resultadoRes;
+      if (metaResolucion === null) {
+        resultadoRes = 'sin_sla';
+      } else if (!h.length && sigueSinAsignar && !cerrado) {
+        // Nunca se ha tomado: todo el tiempo desde la creación cuenta como espera del CAU
+        const horas = Math.max(0, (now - creado) / HORA);
+        horasCAU = redondear(horas); horasOtras = 0; horasCliente = 0;
+        resolucionHoras = redondear(horas);
+        resultadoRes = clasificarAbierto(horas, metaResolucion);
+      } else if (!h.length) {
+        resultadoRes = 'sin_datos';
+      } else {
+        // Tramos: [creación → primer cambio] con el estado inicial, y luego uno por cada cambio
+        const tramos = [{ estado: h[0].prev_name || 'Sin asignar', inicio: creado, fin: new Date(h[0].changed_at) }];
+        h.forEach((row, k) => {
+          tramos.push({
+            estado: row.new_name,
+            inicio: new Date(row.changed_at),
+            fin: h[k + 1] ? new Date(h[k + 1].changed_at) : now
+          });
+        });
+        const acumulado = { cau: 0, otras: 0, cliente: 0 };
+        tramos.forEach(tr => {
+          const grupo = grupoEstado(tr.estado);
+          const horas = Math.max(0, (tr.fin - tr.inicio) / HORA);
+          if (grupo === 'cerrado') return;
+          if (grupo === 'cliente') acumulado.cliente += horas;
+          else if (grupo === 'otras') acumulado.otras += horas;
+          else acumulado.cau += horas; // Sin asignar y CAU
+        });
+        horasCAU = redondear(acumulado.cau);
+        horasOtras = redondear(acumulado.otras);
+        horasCliente = redondear(acumulado.cliente);
+        const efectivas = acumulado.cau + acumulado.otras;
+        resolucionHoras = redondear(efectivas);
+        resultadoRes = cerrado
+          ? (efectivas <= metaResolucion ? 'cumplido' : 'incumplido')
+          : clasificarAbierto(efectivas, metaResolucion);
       }
 
       const agentes = (t.assigned_agent ? t.assigned_agent.toString().split('|') : [])
@@ -1152,49 +1209,73 @@ app.get('/api/sla', async (req, res) => {
         status: t.status_name_es || '-',
         agentes,
         impacto: impacto.name,
+        cerrado,
+        // respuesta
         metaHoras,
-        respuestaHoras: respuestaHoras === null ? null : Math.round(respuestaHoras * 10) / 10,
-        pendiente: !h && resultado !== 'sin_datos' && resultado !== 'sin_sla',
-        resultado
+        respuestaHoras: respuestaHoras === null ? null : redondear(respuestaHoras),
+        pendiente: !h.length && resultado !== 'sin_datos' && resultado !== 'sin_sla',
+        resultado,
+        // resolución
+        metaResolucion,
+        resolucionHoras,
+        horasCAU,
+        horasOtras,
+        horasCliente,
+        resultadoRes
       };
     });
 
-    const resumir = (lista) => {
+    const resumir = (lista, campoResultado, campoHoras, soloTerminados) => {
       const c = { cumplido: 0, incumplido: 0, en_tiempo: 0, en_riesgo: 0, sin_datos: 0, sin_sla: 0 };
-      lista.forEach(t => { c[t.resultado]++; });
+      lista.forEach(t => { c[t[campoResultado]]++; });
       const medidos = c.cumplido + c.incumplido;
-      const conRespuesta = lista.filter(t => !t.pendiente && t.respuestaHoras !== null);
+      const terminados = lista.filter(soloTerminados).filter(t => t[campoHoras] !== null);
       return {
         ...c,
         medidos,
         porcentaje: medidos ? Math.round((c.cumplido / medidos) * 1000) / 10 : null,
-        promedioRespuestaHoras: conRespuesta.length
-          ? Math.round(conRespuesta.reduce((a, t) => a + t.respuestaHoras, 0) / conRespuesta.length * 10) / 10
+        promedioHoras: terminados.length
+          ? redondear(terminados.reduce((a, t) => a + t[campoHoras], 0) / terminados.length)
           : null
       };
     };
 
-    const agrupar = (claveDe) => {
-      const grupos = {};
-      tickets.forEach(t => {
-        claveDe(t).forEach(k => { (grupos[k] = grupos[k] || []).push(t); });
-      });
-      return Object.entries(grupos).map(([nombre, lista]) => ({ nombre, ...resumir(lista) }));
+    const ordenImpacto = impactos.rows.map(r => r.name);
+    const construir = (campoResultado, campoHoras, soloTerminados) => {
+      const agrupar = (claveDe) => {
+        const grupos = {};
+        tickets.forEach(t => { claveDe(t).forEach(k => { (grupos[k] = grupos[k] || []).push(t); }); });
+        return Object.entries(grupos).map(([nombre, lista]) => ({ nombre, ...resumir(lista, campoResultado, campoHoras, soloTerminados) }));
+      };
+      return {
+        general: resumir(tickets, campoResultado, campoHoras, soloTerminados),
+        porImpacto: agrupar(t => [t.impacto]).sort((a, b) => ordenImpacto.indexOf(a.nombre) - ordenImpacto.indexOf(b.nombre)),
+        porAgente: agrupar(t => t.agentes.length ? t.agentes : ['Sin asignar']).sort((a, b) => (b.porcentaje ?? -1) - (a.porcentaje ?? -1)),
+        porInstancia: agrupar(t => [t.instance]).filter(g => g.medidos > 0)
+          .sort((a, b) => (b.incumplido - a.incumplido) || (a.porcentaje ?? 101) - (b.porcentaje ?? 101)).slice(0, 10)
+      };
     };
 
-    const ordenImpacto = impactos.rows.map(r => r.name);
+    const respuesta = construir('resultado', 'respuestaHoras', t => !t.pendiente);
+    const resolucion = construir('resultadoRes', 'resolucionHoras', t => t.cerrado);
+
     res.json({
       metas: SLA_HORAS,
-      general: resumir(tickets),
-      porImpacto: agrupar(t => [t.impacto]).sort((a, b) => ordenImpacto.indexOf(a.nombre) - ordenImpacto.indexOf(b.nombre)),
-      porAgente: agrupar(t => t.agentes.length ? t.agentes : ['Sin asignar']).sort((a, b) => (b.porcentaje ?? -1) - (a.porcentaje ?? -1)),
-      porInstancia: agrupar(t => [t.instance]).filter(g => g.medidos > 0)
-        .sort((a, b) => (b.incumplido - a.incumplido) || (a.porcentaje ?? 101) - (b.porcentaje ?? 101)).slice(0, 10),
-      // Tickets aún sin tomar: los vencidos y en riesgo primero
+      metasResolucion: SLA_RESOLUCION_HORAS,
+      // Respuesta (se mantiene el formato anterior)
+      ...respuesta,
       pendientes: tickets.filter(t => t.pendiente)
         .sort((a, b) => (b.respuestaHoras / b.metaHoras) - (a.respuestaHoras / a.metaHoras)),
       incumplidos: tickets.filter(t => t.resultado === 'incumplido' && !t.pendiente)
-        .sort((a, b) => b.id - a.id).slice(0, 30)
+        .sort((a, b) => b.id - a.id).slice(0, 30),
+      // Resolución
+      resolucion: {
+        ...resolucion,
+        abiertos: tickets.filter(t => !t.cerrado && ['en_tiempo', 'en_riesgo', 'incumplido'].includes(t.resultadoRes))
+          .sort((a, b) => (b.resolucionHoras / b.metaResolucion) - (a.resolucionHoras / a.metaResolucion)),
+        incumplidos: tickets.filter(t => t.cerrado && t.resultadoRes === 'incumplido')
+          .sort((a, b) => b.id - a.id).slice(0, 30)
+      }
     });
 
   } catch (error) {
