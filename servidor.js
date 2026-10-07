@@ -1059,6 +1059,150 @@ app.get('/api/actualizaciones', async (req, res) => {
   }
 });
 
+// ===== SLA DE RESPUESTA =====
+// Política de Frog ADN: Stopper 4 h · Issue 24 h · Nice To Have 72 h · Nueva funcionalidad sin SLA (según análisis)
+// "Respuesta" = el ticket sale de "Sin asignar" (alguien lo toma). Horas naturales.
+// El filtro de fechas aplica sobre la fecha de CREACIÓN del ticket.
+const SLA_HORAS = { 'stopper': 4, 'issue': 24, 'nice to have': 72, 'nueva funcionalidad': null };
+const SLA_EN_RIESGO = 0.75; // un ticket sin tomar está "en riesgo" al consumir el 75% de su meta
+
+app.get('/api/sla', async (req, res) => {
+  try {
+    const { startDate, endDate } = req.query;
+    const fechaValida = (f) => /^\d{4}-\d{2}-\d{2}$/.test(f || '');
+    // Fecha de creación en hora de México (se guarda en UTC)
+    const filtroCreacion = fechaValida(startDate) && fechaValida(endDate)
+      ? ` AND (t.date_created AT TIME ZONE 'UTC' AT TIME ZONE 'America/Mexico_City')::date BETWEEN '${startDate}' AND '${endDate}'`
+      : '';
+    const estadosEsp = await getEstadosEspeciales();
+
+    const impactos = await pool.query('SELECT id, name, sort_order FROM sc_impacts ORDER BY sort_order');
+    const impactoPorId = {};
+    impactos.rows.forEach(r => { impactoPorId[r.id.toString()] = r; });
+    const issue = impactos.rows.find(r => normalizeTxt(r.name) === 'issue');
+
+    const result = await pool.query(`
+      SELECT DISTINCT ON (t.ticket_id)
+        t.ticket_id, t.subject, t.cust_26, t.cust_41, t.assigned_agent, t.status, t.date_created,
+        s.status_name_es
+      FROM support_candy_tickets t
+      LEFT JOIN sc_statuses s ON s.status_id = t.status
+      WHERE t.date_created IS NOT NULL
+        AND (t.status IS NULL OR t.status NOT IN ${SQL_SPAM_IDS})
+        AND ${CAU_AGENT_FILTER}
+        ${filtroCreacion}
+      ORDER BY t.ticket_id, t.date_updated DESC
+    `);
+
+    const ids = result.rows.map(r => r.ticket_id);
+    const primerCambio = {};
+    if (ids.length) {
+      const hist = await pool.query(`
+        SELECT DISTINCT ON (tsh.ticket_id) tsh.ticket_id, tsh.changed_at, s_prev.status_name_es AS prev_name
+        FROM ticket_state_history tsh
+        LEFT JOIN sc_statuses s_prev ON s_prev.status_id = tsh.previous_status
+        WHERE tsh.ticket_id = ANY($1)
+        ORDER BY tsh.ticket_id, tsh.changed_at ASC
+      `, [ids]);
+      hist.rows.forEach(h => { primerCambio[h.ticket_id] = h; });
+    }
+
+    const agentsResult = await pool.query('SELECT agent_id, agent_name FROM sc_agents');
+    const agentMap = {};
+    agentsResult.rows.forEach(a => { agentMap[a.agent_id.toString()] = a.agent_name; });
+
+    const now = new Date();
+    const tickets = result.rows.map(t => {
+      // Impacto más severo del ticket (el campo es multi-select); sin impacto → Issue (default de Support Candy)
+      const ids41 = (t.cust_41 || '').toString().split(/[^0-9]+/).filter(Boolean);
+      const imps = ids41.map(id => impactoPorId[id]).filter(Boolean).sort((a, b) => a.sort_order - b.sort_order);
+      const impacto = imps[0] || issue || { name: 'Issue' };
+      const clave = normalizeTxt(impacto.name);
+      const metaHoras = Object.prototype.hasOwnProperty.call(SLA_HORAS, clave) ? SLA_HORAS[clave] : 24;
+
+      const creado = new Date(t.date_created);
+      const h = primerCambio[t.ticket_id];
+      const sigueSinAsignar = grupoEstado(t.status_name_es) === 'espera';
+
+      let respuestaHoras = null;
+      let resultado;
+      if (metaHoras === null) {
+        resultado = 'sin_sla';
+      } else if (h) {
+        // Si nació en otro estado (lo creó un agente ya tomado), la respuesta es inmediata
+        respuestaHoras = grupoEstado(h.prev_name || 'Sin asignar') === 'espera'
+          ? Math.max(0, (new Date(h.changed_at) - creado) / 3600000) : 0;
+        resultado = respuestaHoras <= metaHoras ? 'cumplido' : 'incumplido';
+      } else if (sigueSinAsignar && !estadosEsp.cerrado.has(String(t.status))) {
+        const transcurridas = Math.max(0, (now - creado) / 3600000);
+        respuestaHoras = transcurridas;
+        resultado = transcurridas > metaHoras ? 'incumplido'
+          : (transcurridas >= metaHoras * SLA_EN_RIESGO ? 'en_riesgo' : 'en_tiempo');
+      } else {
+        resultado = 'sin_datos'; // ticket anterior al histórico
+      }
+
+      const agentes = (t.assigned_agent ? t.assigned_agent.toString().split('|') : [])
+        .map(v => agentMap[v.trim()]).filter(Boolean);
+
+      return {
+        id: t.ticket_id,
+        subject: t.subject || '',
+        instance: t.cust_26 || '-',
+        status: t.status_name_es || '-',
+        agentes,
+        impacto: impacto.name,
+        metaHoras,
+        respuestaHoras: respuestaHoras === null ? null : Math.round(respuestaHoras * 10) / 10,
+        pendiente: !h && resultado !== 'sin_datos' && resultado !== 'sin_sla',
+        resultado
+      };
+    });
+
+    const resumir = (lista) => {
+      const c = { cumplido: 0, incumplido: 0, en_tiempo: 0, en_riesgo: 0, sin_datos: 0, sin_sla: 0 };
+      lista.forEach(t => { c[t.resultado]++; });
+      const medidos = c.cumplido + c.incumplido;
+      const conRespuesta = lista.filter(t => !t.pendiente && t.respuestaHoras !== null);
+      return {
+        ...c,
+        medidos,
+        porcentaje: medidos ? Math.round((c.cumplido / medidos) * 1000) / 10 : null,
+        promedioRespuestaHoras: conRespuesta.length
+          ? Math.round(conRespuesta.reduce((a, t) => a + t.respuestaHoras, 0) / conRespuesta.length * 10) / 10
+          : null
+      };
+    };
+
+    const agrupar = (claveDe) => {
+      const grupos = {};
+      tickets.forEach(t => {
+        claveDe(t).forEach(k => { (grupos[k] = grupos[k] || []).push(t); });
+      });
+      return Object.entries(grupos).map(([nombre, lista]) => ({ nombre, ...resumir(lista) }));
+    };
+
+    const ordenImpacto = impactos.rows.map(r => r.name);
+    res.json({
+      metas: SLA_HORAS,
+      general: resumir(tickets),
+      porImpacto: agrupar(t => [t.impacto]).sort((a, b) => ordenImpacto.indexOf(a.nombre) - ordenImpacto.indexOf(b.nombre)),
+      porAgente: agrupar(t => t.agentes.length ? t.agentes : ['Sin asignar']).sort((a, b) => (b.porcentaje ?? -1) - (a.porcentaje ?? -1)),
+      porInstancia: agrupar(t => [t.instance]).filter(g => g.medidos > 0)
+        .sort((a, b) => (b.incumplido - a.incumplido) || (a.porcentaje ?? 101) - (b.porcentaje ?? 101)).slice(0, 10),
+      // Tickets aún sin tomar: los vencidos y en riesgo primero
+      pendientes: tickets.filter(t => t.pendiente)
+        .sort((a, b) => (b.respuestaHoras / b.metaHoras) - (a.respuestaHoras / a.metaHoras)),
+      incumplidos: tickets.filter(t => t.resultado === 'incumplido' && !t.pendiente)
+        .sort((a, b) => b.id - a.id).slice(0, 30)
+    });
+
+  } catch (error) {
+    console.error('Error en /api/sla:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // API: Obtener todos los tickets con detalles (SIN DUPLICADOS)
 app.get('/api/tickets', async (req, res) => {
   try {
@@ -1116,7 +1260,8 @@ app.get('/api/tickets', async (req, res) => {
         status: t.status_name_es || `Status ${t.status}`,
         priority: priorityMap[t.priority] || `Priority ${t.priority}`,
         agent: agentName,
-        category: t.category_name || '-',
+        // Si la categoría no está en sc_categories se muestra su número, para detectar que falta en el catálogo
+        category: t.category_name || (t.category ? `Categoría ${t.category}` : '-'),
         customer: t.customer || '-',
         cust_26: t.cust_26 || '-',
         impact: getImpactNames(t.cust_41),

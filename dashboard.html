@@ -1472,6 +1472,169 @@
       margin: 16px 32px 0;
     }
 
+    /* SLA */
+    .sla-top {
+      display: grid;
+      grid-template-columns: 260px 1fr;
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+
+    .sla-gauge {
+      background: var(--marino);
+      color: var(--blanco);
+      border-radius: 16px;
+      padding: 22px 24px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+
+    .sla-gauge .label {
+      font-size: 13px;
+      color: var(--lavanda);
+    }
+
+    .sla-gauge .pct {
+      font-family: var(--f-cifra);
+      font-size: 46px;
+      font-weight: 600;
+      line-height: 1.1;
+      margin: 4px 0 8px;
+    }
+
+    .sla-gauge .detalle {
+      font-size: 12.5px;
+      color: var(--lavanda);
+    }
+
+    .sla-gauge .detalle b {
+      font-family: var(--f-cifra);
+      color: var(--blanco);
+    }
+
+    .sla-metas {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+    }
+
+    .sla-meta {
+      background: var(--blanco);
+      border: 1px solid var(--linea);
+      border-top: 4px solid var(--indigo);
+      border-radius: 12px;
+      padding: 14px 16px;
+    }
+
+    .sla-meta.stopper { border-top-color: var(--rojo); }
+    .sla-meta.issue { border-top-color: var(--ambar); }
+    .sla-meta.nice-to-have { border-top-color: #8F8BC4; }
+    .sla-meta.nueva-funcionalidad { border-top-color: var(--verde); }
+
+    .sla-meta h4 {
+      font-family: var(--f-titulo);
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .sla-meta .meta {
+      font-size: 12px;
+      color: var(--gris);
+    }
+
+    .sla-meta .valor {
+      font-family: var(--f-cifra);
+      font-size: 26px;
+      font-weight: 600;
+      margin-top: 6px;
+    }
+
+    .sla-meta .conteo {
+      font-size: 12px;
+      color: var(--gris);
+    }
+
+    .sla-bar {
+      height: 6px;
+      background: var(--niebla);
+      border-radius: 999px;
+      overflow: hidden;
+      margin: 8px 0 6px;
+    }
+
+    .sla-bar div {
+      height: 100%;
+      border-radius: 999px;
+    }
+
+    .sla-ok { color: var(--verde); }
+    .sla-warn { color: #C98A2E; }
+    .sla-bad { color: var(--rojo); }
+    .sla-bg-ok { background: var(--verde); }
+    .sla-bg-warn { background: var(--ambar); }
+    .sla-bg-bad { background: var(--rojo); }
+
+    .sla-block {
+      background: var(--blanco);
+      border: 1px solid var(--linea);
+      border-radius: 14px;
+      padding: 18px 20px;
+      margin-bottom: 20px;
+    }
+
+    .sla-block h3,
+    .sla-details summary {
+      font-family: var(--f-titulo);
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--marino);
+      margin-bottom: 10px;
+    }
+
+    .sla-details summary {
+      cursor: pointer;
+      margin-bottom: 0;
+    }
+
+    .sla-details[open] summary {
+      margin-bottom: 12px;
+    }
+
+    .sla-block table,
+    .sla-list-card table {
+      font-size: 13px;
+    }
+
+    .sla-chip {
+      display: inline-block;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 3px 10px;
+      border-radius: 999px;
+      white-space: nowrap;
+    }
+
+    .sla-chip.vencido { background: #FBE5E6; color: #A3333A; }
+    .sla-chip.riesgo { background: #FBF1DC; color: #8A5A12; }
+    .sla-chip.tiempo { background: #E2F1E9; color: #2B7353; }
+
+    .sla-list-card {
+      height: auto !important;
+      min-height: 350px;
+    }
+
+    .sla-time {
+      font-family: var(--f-cifra);
+      white-space: nowrap;
+    }
+
+    @media (max-width: 860px) {
+      .sla-top {
+        grid-template-columns: 1fr;
+      }
+    }
+
     /* Planeación de instancias */
     .inst-stats {
       display: grid;
@@ -1883,6 +2046,7 @@
 
     <div class="tabs-bar">
       <button class="tab-btn active" data-tab="tab-rezago" onclick="showTab('tab-rezago')">Rezago</button>
+      <button class="tab-btn" data-tab="tab-sla" onclick="showTab('tab-sla')">SLA</button>
       <button class="tab-btn" data-tab="tab-carga" onclick="showTab('tab-carga')">Carga de trabajo</button>
       <button class="tab-btn" data-tab="tab-rendimiento" onclick="showTab('tab-rendimiento')">Rendimiento</button>
       <button class="tab-btn" data-tab="tab-actualizaciones" onclick="showTab('tab-actualizaciones')">Actualizaciones</button>
@@ -1902,6 +2066,39 @@
       </div>
     </div>
 
+    </div>
+
+    <div class="tab-panel" id="tab-sla">
+      <div class="sla-section">
+        <h2 class="section-title">Cumplimiento de SLA <span class="section-hint">Tiempo de respuesta según el impacto · tickets creados en el periodo</span></h2>
+        <div class="sla-top">
+          <div class="sla-gauge" id="slaGauge"></div>
+          <div class="sla-metas" id="slaMetas"></div>
+        </div>
+
+        <div class="sla-block">
+          <h3>Sin tomar ahora <span class="analysis-info" id="slaPendInfo"></span></h3>
+          <div id="slaPendientes"></div>
+        </div>
+
+        <div class="charts-grid">
+          <div class="chart-container">
+            <h3>Cumplimiento por agente</h3>
+            <canvas id="slaAgenteChart"></canvas>
+          </div>
+          <div class="chart-container sla-list-card">
+            <h3>Instancias con más incumplimientos</h3>
+            <div id="slaInstancias"></div>
+          </div>
+        </div>
+
+        <details class="sla-block sla-details">
+          <summary>Tickets que no cumplieron el SLA <span class="analysis-info" id="slaIncInfo"></span></summary>
+          <div id="slaIncumplidos"></div>
+        </details>
+
+        <p class="perf-note">Respuesta = cuando el ticket sale de "Sin asignar" (alguien lo toma). Horas naturales. Stopper 4 h · Issue 24 h · Nice To Have 72 h · Nueva funcionalidad sin SLA (según análisis y cotización). Si un ticket tiene varios impactos se usa el más severo; sin impacto se toma como Issue. Los tickets anteriores al histórico aparecen como "sin datos".</p>
+      </div>
     </div>
 
     <div class="tab-panel" id="tab-carga">
@@ -2145,6 +2342,7 @@
           loadChart('instanciaChart', 'tickets-por-instancia', params, 'Instancia'),
           loadChart('impactoChart', 'tickets-por-impacto', params, 'Impacto'),
           loadAgingChart(),
+          loadSLA(params),
           loadCarga(),
           loadActualizaciones(),
           loadInstancias(),
@@ -3072,6 +3270,131 @@
         await loadInstancias();
       } catch (error) {
         document.getElementById('instFormError').textContent = `No se eliminó: ${error.message}`;
+      }
+    }
+
+    // ===== SLA =====
+    const slaClase = (p) => p === null ? '' : (p >= 90 ? 'ok' : (p >= 75 ? 'warn' : 'bad'));
+    const fmtHoras = (h) => {
+      if (h === null || h === undefined) return '-';
+      if (h < 1) return `${Math.round(h * 60)} min`;
+      if (h >= 24) {
+        const dd = Math.floor(h / 24), hh = Math.round(h % 24);
+        return hh ? `${dd}d ${hh}h` : `${dd}d`;
+      }
+      return `${Math.round(h * 10) / 10} h`;
+    };
+
+    async function loadSLA(params) {
+      try {
+        const response = await fetch(`/api/sla?${params}`);
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+        const g = data.general;
+
+        // Indicador general
+        const pctTxt = g.porcentaje === null ? '—' : `${g.porcentaje}%`;
+        document.getElementById('slaGauge').innerHTML = `
+          <span class="label">Cumplimiento de SLA</span>
+          <span class="pct">${pctTxt}</span>
+          <span class="detalle"><b>${g.cumplido}</b> en tiempo · <b>${g.incumplido}</b> fuera de tiempo</span>
+          <span class="detalle">Respuesta promedio: <b>${fmtHoras(g.promedioRespuestaHoras)}</b></span>`;
+
+        // Tarjetas por impacto (en el orden de la política)
+        const metas = [
+          { nombre: 'Stopper', meta: '4 horas' },
+          { nombre: 'Issue', meta: '24 horas' },
+          { nombre: 'Nice To Have', meta: '72 horas' },
+          { nombre: 'Nueva funcionalidad', meta: 'Según análisis' }
+        ];
+        document.getElementById('slaMetas').innerHTML = metas.map(m => {
+          const r = data.porImpacto.find(x => x.nombre.toLowerCase() === m.nombre.toLowerCase());
+          const clase = m.nombre.toLowerCase().replace(/\s+/g, '-');
+          if (m.nombre === 'Nueva funcionalidad') {
+            return `<div class="sla-meta ${clase}"><h4>${m.nombre}</h4><span class="meta">Meta: ${m.meta}</span>
+              <div class="valor" style="color:var(--gris);font-size:18px;">Sin SLA</div>
+              <span class="conteo">${r ? r.sin_sla : 0} ${r && r.sin_sla === 1 ? 'ticket' : 'tickets'} · requiere cotización</span></div>`;
+          }
+          const p = r ? r.porcentaje : null;
+          return `<div class="sla-meta ${clase}"><h4>${m.nombre}</h4><span class="meta">Meta: ${m.meta}</span>
+            <div class="valor sla-${slaClase(p)}">${p === null ? '—' : p + '%'}</div>
+            <div class="sla-bar"><div class="sla-bg-${slaClase(p) || 'ok'}" style="width:${p || 0}%"></div></div>
+            <span class="conteo">${r ? `${r.cumplido} de ${r.medidos} en tiempo${r.en_riesgo ? ` · ${r.en_riesgo} en riesgo` : ''}` : 'Sin tickets'}</span></div>`;
+        }).join('');
+
+        // Pendientes de tomar
+        const pend = data.pendientes || [];
+        document.getElementById('slaPendInfo').textContent = pend.length ? `${pend.length} tickets esperando que alguien los tome` : '';
+        document.getElementById('slaPendientes').innerHTML = pend.length
+          ? `<table><thead><tr><th>Ticket</th><th>Asunto</th><th>Instancia</th><th>Impacto</th><th>Esperando</th><th>Meta</th><th>Situación</th></tr></thead><tbody>${pend.map(t => {
+              const restante = t.metaHoras - t.respuestaHoras;
+              const chip = t.resultado === 'incumplido'
+                ? `<span class="sla-chip vencido">Vencido hace ${fmtHoras(-restante)}</span>`
+                : (t.resultado === 'en_riesgo'
+                  ? `<span class="sla-chip riesgo">Quedan ${fmtHoras(restante)}</span>`
+                  : `<span class="sla-chip tiempo">Quedan ${fmtHoras(restante)}</span>`);
+              return `<tr onclick="openTimeline(${t.id})">
+                <td class="ticket-id"><a class="sc-link" href="${scTicketLink(t.id)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">#${t.id} ↗</a></td>
+                <td>${escapeHtml(t.subject)}</td><td>${escapeHtml(t.instance)}</td><td>${escapeHtml(t.impacto)}</td>
+                <td class="sla-time">${fmtHoras(t.respuestaHoras)}</td><td class="sla-time">${t.metaHoras} h</td><td>${chip}</td></tr>`;
+            }).join('')}</tbody></table>`
+          : emptyState('Nada esperando', 'Todos los tickets del periodo ya fueron tomados por alguien del equipo.');
+
+        // Por agente
+        const agentes = data.porAgente.filter(a => a.medidos > 0 && a.nombre !== 'Sin asignar');
+        if (charts['slaAgenteChart']) charts['slaAgenteChart'].destroy();
+        const colorPct = (p) => p >= 90 ? '#3C9A6E' : (p >= 75 ? '#E0A33B' : '#C8434B');
+        charts['slaAgenteChart'] = new Chart(document.getElementById('slaAgenteChart').getContext('2d'), {
+          type: 'bar',
+          data: {
+            labels: agentes.map(a => a.nombre),
+            datasets: [{ label: '% en tiempo', data: agentes.map(a => a.porcentaje), backgroundColor: agentes.map(a => colorPct(a.porcentaje)), borderRadius: 6, minBarLength: 6 }]
+          },
+          options: {
+            indexAxis: 'y',
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { display: false },
+              tooltip: { callbacks: {
+                label: (item) => `${item.raw}% en tiempo`,
+                afterLabel: (item) => {
+                  const a = agentes[item.dataIndex];
+                  return [`${a.cumplido} de ${a.medidos} tickets`, `Respuesta promedio: ${fmtHoras(a.promedioRespuestaHoras)}`];
+                }
+              } }
+            },
+            scales: { x: { min: 0, max: 100, ticks: { callback: (v) => v + '%' } } },
+            onClick: (event, elements) => {
+              if (elements.length > 0) filterTicketsByAgent(agentes[elements[0].index].nombre);
+            }
+          }
+        });
+
+        // Instancias con más incumplimientos
+        const inst = data.porInstancia.filter(i => i.incumplido > 0);
+        document.getElementById('slaInstancias').innerHTML = inst.length
+          ? `<table><thead><tr><th>Instancia</th><th>Fuera de tiempo</th><th>Cumplimiento</th></tr></thead><tbody>${inst.map(i =>
+              `<tr onclick="filterTicketsByInstance('${escapeHtml(i.nombre)}')"><td><strong>${escapeHtml(i.nombre)}</strong></td>
+               <td class="sla-time">${i.incumplido} de ${i.medidos}</td>
+               <td class="sla-time sla-${slaClase(i.porcentaje)}">${i.porcentaje}%</td></tr>`).join('')}</tbody></table>`
+          : emptyState('Sin incumplimientos', 'Ninguna instancia tiene tickets fuera de tiempo en el periodo.');
+
+        // Incumplidos (ya tomados, pero tarde)
+        const inc = data.incumplidos || [];
+        document.getElementById('slaIncInfo').textContent = `(${inc.length})`;
+        document.getElementById('slaIncumplidos').innerHTML = inc.length
+          ? `<table><thead><tr><th>Ticket</th><th>Asunto</th><th>Instancia</th><th>Impacto</th><th>Agente</th><th>Respuesta</th><th>Meta</th></tr></thead><tbody>${inc.map(t =>
+              `<tr onclick="openTimeline(${t.id})">
+                <td class="ticket-id"><a class="sc-link" href="${scTicketLink(t.id)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">#${t.id} ↗</a></td>
+                <td>${escapeHtml(t.subject)}</td><td>${escapeHtml(t.instance)}</td><td>${escapeHtml(t.impacto)}</td>
+                <td>${escapeHtml(t.agentes.join(', ') || 'Sin asignar')}</td>
+                <td class="sla-time sla-bad">${fmtHoras(t.respuestaHoras)}</td><td class="sla-time">${t.metaHoras} h</td></tr>`).join('')}</tbody></table>`
+          : '<p class="perf-note">Ningún ticket tomado fuera de tiempo en el periodo.</p>';
+
+      } catch (error) {
+        console.error('Error cargando SLA:', error);
+        document.getElementById('slaGauge').innerHTML = `<span class="label">No se pudo calcular el SLA</span><span class="detalle">${escapeHtml(error.message)}</span>`;
       }
     }
 
