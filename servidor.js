@@ -187,12 +187,13 @@ app.post('/webhook/support-candy', async (req, res) => {
 });
 
 // Función helper para construir WHERE con filtro de fechas
+// Cuenta los tickets cuya fecha de modificación (en hora de México) esté entre las fechas elegidas.
+// date_updated se guarda en UTC: sin convertirla, un ticket modificado el viernes a las 7 PM
+// quedaba en "sábado" y uno del domingo a las 8 PM entraba como "lunes".
 const getDateFilter = (startDate, endDate) => {
-  let filter = '';
-  if (startDate && endDate) {
-    filter = ` AND t.date_updated >= '${startDate}' AND t.date_updated <= '${endDate} 23:59:59'`;
-  }
-  return filter;
+  const fechaOk = (f) => /^\d{4}-\d{2}-\d{2}$/.test(f || '');
+  if (!fechaOk(startDate) || !fechaOk(endDate)) return '';
+  return ` AND (t.date_updated AT TIME ZONE 'UTC' AT TIME ZONE 'America/Mexico_City')::date BETWEEN '${startDate}' AND '${endDate}'`;
 };
 
 // API: Obtener KPIs principales
@@ -633,11 +634,14 @@ const grupoEstado = (statusName) => {
   return 'otras';
 };
 // Filtro exacto de agentes del CAU (evita que 5 coincida con 25)
-const CAU_AGENT_FILTER = `
-  EXISTS (
+// Tickets del CAU: asignados a alguien del equipo, o todavía sin agente (recién creados, "Sin asignar")
+const CAU_AGENT_FILTER = `(
+  COALESCE(TRIM(t.assigned_agent::text), '') IN ('', '0')
+  OR EXISTS (
     SELECT 1 FROM unnest(string_to_array(t.assigned_agent::text, '|')) AS ag(id)
     WHERE TRIM(ag.id) IN ('22', '23', '17', '5', '3')
-  )`;
+  )
+)`;
 // Fecha local de México (las fechas se guardan en UTC)
 const fechaMX = (col) => `to_char((${col} AT TIME ZONE 'UTC' AT TIME ZONE 'America/Mexico_City')::date, 'YYYY-MM-DD')`;
 
@@ -928,7 +932,7 @@ app.get('/api/carga-agentes', async (req, res) => {
       const esStopper = impactos.some(id => stopperIds.includes(id));
       const conRezago = rezagoIds.has(t.ticket_id.toString());
 
-      const ids = t.assigned_agent.toString().split('|').map(v => v.trim());
+      const ids = (t.assigned_agent || '').toString().split('|').map(v => v.trim());
       ids.filter(id => carga[id]).forEach(id => {
         const c = carga[id];
         c[grupoCarga]++;
@@ -1067,6 +1071,71 @@ app.get('/api/actualizaciones', async (req, res) => {
 //   OLA CAU     = lo mismo, pero también en pausa mientras está en otras áreas (programación, validación...).
 //                 Mide solo el tiempo que depende del CAU.
 // Horas naturales. El filtro de fechas aplica sobre la fecha de CREACIÓN del ticket.
+// ===== HORARIO DE SERVICIO (ITIL "service hours") =====
+// El reloj del SLA solo corre de lunes a viernes de 9:00 a 19:00 (hora de México), sin días festivos.
+// México (CDMX) está en UTC-6 todo el año desde 2022 (sin horario de verano).
+const HORARIO_SERVICIO = { inicio: 9, fin: 19, dias: [1, 2, 3, 4, 5], offsetUTC: -6 };
+// Si algún día los Stoppers se atienden con guardia 24/7 por ticket, cambiar a true
+const STOPPER_24_7 = false;
+// Festivos adicionales de la empresa (formato 'YYYY-MM-DD'), además de los oficiales
+const FESTIVOS_EMPRESA = [];
+
+const festivosCache = {};
+const festivosOficiales = (anio) => {
+  if (festivosCache[anio]) return festivosCache[anio];
+  const iso = (m, d) => `${anio}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  // n-ésimo lunes del mes (n = 1, 2, 3...)
+  const nLunes = (mes, n) => {
+    const primero = new Date(Date.UTC(anio, mes - 1, 1)).getUTCDay();
+    const dia = 1 + ((8 - primero) % 7) + (n - 1) * 7;
+    return iso(mes, dia);
+  };
+  const lista = new Set([
+    iso(1, 1),        // Año Nuevo
+    nLunes(2, 1),     // Constitución (primer lunes de febrero)
+    nLunes(3, 3),     // Natalicio de Benito Juárez (tercer lunes de marzo)
+    iso(5, 1),        // Día del Trabajo
+    iso(9, 16),       // Independencia
+    nLunes(11, 3),    // Revolución (tercer lunes de noviembre)
+    iso(12, 25),      // Navidad
+    ...FESTIVOS_EMPRESA
+  ]);
+  if ((anio - 2024) % 6 === 0) lista.add(iso(10, 1)); // Transmisión del Poder Ejecutivo
+  festivosCache[anio] = lista;
+  return lista;
+};
+
+// Horas hábiles entre dos instantes (Date), según el horario de servicio
+const horasHabiles = (inicio, fin) => {
+  if (!(inicio instanceof Date)) inicio = new Date(inicio);
+  if (!(fin instanceof Date)) fin = new Date(fin);
+  if (!(fin > inicio)) return 0;
+  const off = HORARIO_SERVICIO.offsetUTC * 3600000;
+  // Trabajamos en "hora local" desplazando a UTC para usar getUTC*
+  const ini = new Date(inicio.getTime() + off);
+  const end = new Date(fin.getTime() + off);
+  let total = 0;
+  const dia = new Date(Date.UTC(ini.getUTCFullYear(), ini.getUTCMonth(), ini.getUTCDate()));
+  while (dia <= end) {
+    const iso = dia.toISOString().slice(0, 10);
+    if (HORARIO_SERVICIO.dias.includes(dia.getUTCDay()) && !festivosOficiales(dia.getUTCFullYear()).has(iso)) {
+      const abre = new Date(dia.getTime() + HORARIO_SERVICIO.inicio * 3600000);
+      const cierra = new Date(dia.getTime() + HORARIO_SERVICIO.fin * 3600000);
+      const desde = ini > abre ? ini : abre;
+      const hasta = end < cierra ? end : cierra;
+      if (hasta > desde) total += (hasta - desde) / 3600000;
+    }
+    dia.setUTCDate(dia.getUTCDate() + 1);
+  }
+  return total;
+};
+
+// Duración que cuenta para el SLA según el impacto
+const horasSLA = (inicio, fin, claveImpacto) =>
+  (STOPPER_24_7 && claveImpacto === 'stopper')
+    ? Math.max(0, (new Date(fin) - new Date(inicio)) / 3600000)
+    : horasHabiles(inicio, fin);
+
 const SLA_HORAS = { 'stopper': 4, 'issue': 24, 'nice to have': 72, 'nueva funcionalidad': null };
 const SLA_RESOLUCION_HORAS = { 'stopper': 4, 'issue': 24, 'nice to have': 72, 'nueva funcionalidad': null };
 const SLA_EN_RIESGO = 0.75; // un ticket abierto está "en riesgo" al consumir el 75% de su meta
@@ -1147,10 +1216,10 @@ app.get('/api/sla', async (req, res) => {
       } else if (h.length) {
         // Si nació en otro estado (lo creó un agente ya tomado), la respuesta es inmediata
         respuestaHoras = grupoEstado(h[0].prev_name || 'Sin asignar') === 'espera'
-          ? Math.max(0, (new Date(h[0].changed_at) - creado) / HORA) : 0;
+          ? horasSLA(creado, new Date(h[0].changed_at), clave) : 0;
         resultado = respuestaHoras <= metaHoras ? 'cumplido' : 'incumplido';
       } else if (sigueSinAsignar && !cerrado) {
-        respuestaHoras = Math.max(0, (now - creado) / HORA);
+        respuestaHoras = horasSLA(creado, now, clave);
         resultado = clasificarAbierto(respuestaHoras, metaHoras);
       } else {
         resultado = 'sin_datos'; // ticket anterior al histórico
@@ -1168,7 +1237,7 @@ app.get('/api/sla', async (req, res) => {
         resultadoOla = 'sin_sla';
       } else if (!h.length && sigueSinAsignar && !cerrado) {
         // Nunca se ha tomado: todo el tiempo desde la creación cuenta como espera del CAU
-        const horas = Math.max(0, (now - creado) / HORA);
+        const horas = horasSLA(creado, now, clave);
         horasCAU = redondear(horas); horasOtras = 0; horasCliente = 0;
         resolucionHoras = redondear(horas);
         resultadoRes = clasificarAbierto(horas, metaResolucion);
@@ -1189,7 +1258,7 @@ app.get('/api/sla', async (req, res) => {
         const acumulado = { cau: 0, otras: 0, cliente: 0 };
         tramos.forEach(tr => {
           const grupo = grupoEstado(tr.estado);
-          const horas = Math.max(0, (tr.fin - tr.inicio) / HORA);
+          const horas = horasSLA(tr.inicio, tr.fin, clave);
           if (grupo === 'cerrado') return;
           if (grupo === 'cliente') acumulado.cliente += horas;
           else if (grupo === 'otras') acumulado.otras += horas;
@@ -1274,6 +1343,7 @@ app.get('/api/sla', async (req, res) => {
     res.json({
       metas: SLA_HORAS,
       metasResolucion: SLA_RESOLUCION_HORAS,
+      horario: { ...HORARIO_SERVICIO, stopper24x7: STOPPER_24_7 },
       // Respuesta (se mantiene el formato anterior)
       ...respuesta,
       pendientes: tickets.filter(t => t.pendiente)
