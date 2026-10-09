@@ -213,8 +213,23 @@ app.get('/api/kpis', async (req, res) => {
       WHERE ${CAU_AGENT_FILTER} ${dateFilter}
     `);
 
+    // Nuevos: tickets CREADOS en el periodo (fecha de creación en hora de México),
+    // aunque después se hayan modificado fuera del rango
+    const fechaOk = (f) => /^\d{4}-\d{2}-\d{2}$/.test(f || '');
+    const filtroCreacion = fechaOk(startDate) && fechaOk(endDate)
+      ? ` AND (t.date_created AT TIME ZONE 'UTC' AT TIME ZONE 'America/Mexico_City')::date BETWEEN '${startDate}' AND '${endDate}'`
+      : '';
+    const nuevos = await pool.query(`
+      SELECT COUNT(*) AS tickets_nuevos
+      FROM support_candy_tickets t
+      WHERE t.date_created IS NOT NULL
+        AND (t.status IS NULL OR t.status NOT IN ${SQL_SPAM_IDS})
+        AND ${CAU_AGENT_FILTER} ${filtroCreacion}
+    `);
+
     const row = result.rows[0];
     res.json({
+      tickets_nuevos: parseInt(nuevos.rows[0].tickets_nuevos || 0),
       tickets_abiertos: parseInt(row.tickets_abiertos || 0),
       tickets_cerrados: parseInt(row.tickets_cerrados || 0),
       tickets_otras_areas: parseInt(row.tickets_otras_areas || 0),

@@ -1169,7 +1169,7 @@
 
     .hero .kpis {
       display: grid;
-      grid-template-columns: repeat(5, minmax(0, 1fr));
+      grid-template-columns: repeat(6, minmax(0, 1fr));
       gap: 12px;
       max-width: calc(100% - 320px);
       margin-top: 26px;
@@ -1187,6 +1187,11 @@
       box-shadow: none;
     }
 
+    .hero .kpi-nuevos {
+      background: rgba(179, 176, 216, 0.16);
+      border-color: rgba(179, 176, 216, 0.5);
+    }
+
     .hero .kpi-label {
       font-size: 12.5px;
       color: var(--lavanda);
@@ -1196,7 +1201,7 @@
 
     .hero .kpi-value {
       font-family: var(--f-cifra);
-      font-size: 28px;
+      font-size: 26px;
       font-weight: 600;
       color: var(--blanco);
       margin: 4px 0 0;
@@ -2127,7 +2132,7 @@
     <div class="tab-panel" id="tab-sla">
       <div class="sla-section">
         <div class="sla-head">
-          <h2 class="section-title">Cumplimiento de SLA <span class="section-hint">Según el impacto · tickets creados en el periodo</span></h2>
+          <h2 class="section-title">Cumplimiento de SLA <span class="section-hint">Horas hábiles L–V 9:00 a 19:00 · tickets creados en el periodo</span></h2>
           <div class="sla-switch" role="tablist" aria-label="Tipo de SLA">
             <button class="sla-switch-btn active" data-sla="respuesta" onclick="setModoSLA('respuesta')">Respuesta</button>
             <button class="sla-switch-btn" data-sla="resolucion" onclick="setModoSLA('resolucion')">Resolución (cliente)</button>
@@ -2478,6 +2483,10 @@
         const data = await response.json();
 
         document.getElementById('kpisContainer').innerHTML = `
+          <div class="kpi-card kpi-nuevos" title="Tickets creados entre las fechas elegidas">
+            <div class="kpi-label">Nuevos en el periodo</div>
+            <div class="kpi-value">${data.tickets_nuevos}</div>
+          </div>
           <div class="kpi-card">
             <div class="kpi-label">Abiertos</div>
             <div class="kpi-value">${data.tickets_abiertos}</div>
@@ -2490,8 +2499,8 @@
             <div class="kpi-label">En otras áreas</div>
             <div class="kpi-value">${data.tickets_otras_areas}</div>
           </div>
-          <div class="kpi-card">
-            <div class="kpi-label">Total</div>
+          <div class="kpi-card" title="Tickets que tuvieron algún movimiento entre las fechas elegidas">
+            <div class="kpi-label">Con movimiento</div>
             <div class="kpi-value">${data.total_tickets}</div>
           </div>
           <div class="kpi-card">
@@ -3370,6 +3379,13 @@
       }
     }
 
+    // En el SLA todo va en horas hábiles: no se convierte a días (24 h hábiles no son 1 día)
+    const fmtHorasSLA = (h) => {
+      if (h === null || h === undefined) return '-';
+      if (h < 1) return `${Math.round(h * 60)} min`;
+      return `${Math.round(h * 10) / 10} h`;
+    };
+
     function renderSLA() {
       if (!slaData) return;
       const esOla = slaModo === 'ola';
@@ -3380,7 +3396,7 @@
 
       const link = (t) => `<a class="sc-link" href="${scTicketLink(t.id)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">#${t.id} ↗</a>`;
       const dividido = (t) => (t.horasCAU === null ? '' :
-        `<span class="sla-split">CAU ${fmtHoras(t.horasCAU)} · otras áreas ${fmtHoras(t.horasOtras)}${t.horasCliente ? ` · cliente ${fmtHoras(t.horasCliente)} (en pausa)` : ''}</span>`);
+        `<span class="sla-split">CAU ${fmtHorasSLA(t.horasCAU)} · otras áreas ${fmtHorasSLA(t.horasOtras)}${t.horasCliente ? ` · cliente ${fmtHorasSLA(t.horasCliente)} (en pausa)` : ''}</span>`);
 
       // Indicador general
       const pctTxt = g.porcentaje === null ? '—' : `${g.porcentaje}%`;
@@ -3388,7 +3404,7 @@
         <span class="label">${esOla ? 'Resolución CAU (OLA)' : (esRes ? 'Resolución según contrato' : 'Cumplimiento de respuesta')}</span>
         <span class="pct">${pctTxt}</span>
         <span class="detalle"><b>${g.cumplido}</b> en tiempo · <b>${g.incumplido}</b> fuera de tiempo</span>
-        <span class="detalle">${esRes ? 'Resolución' : 'Respuesta'} promedio: <b>${fmtHoras(g.promedioHoras)}</b></span>`;
+        <span class="detalle">${esRes ? 'Resolución' : 'Respuesta'} promedio: <b>${fmtHorasSLA(g.promedioHoras)}</b></span>`;
 
       // Tarjetas por impacto
       // Mismas metas del contrato para respuesta y resolución
@@ -3422,13 +3438,13 @@
         ? `<table><thead><tr><th>Ticket</th><th>Asunto</th><th>Instancia</th><th>Impacto</th>${esRes ? '<th>Estado</th><th>Agente</th>' : ''}<th>${esOla ? 'Tiempo CAU' : (esRes ? 'Tiempo efectivo' : 'Esperando')}</th><th>Meta</th><th>Situación</th></tr></thead><tbody>${pend.map(t => {
             const restante = metaDe(t) - horasDe(t);
             const chip = resultadoDe(t) === 'incumplido'
-              ? `<span class="sla-chip vencido">Vencido hace ${fmtHoras(-restante)}</span>`
-              : `<span class="sla-chip ${resultadoDe(t) === 'en_riesgo' ? 'riesgo' : 'tiempo'}">Quedan ${fmtHoras(restante)}</span>`;
+              ? `<span class="sla-chip vencido">Vencido hace ${fmtHorasSLA(-restante)} háb.</span>`
+              : `<span class="sla-chip ${resultadoDe(t) === 'en_riesgo' ? 'riesgo' : 'tiempo'}">Quedan ${fmtHorasSLA(restante)} háb.</span>`;
             return `<tr onclick="openTimeline(${t.id})">
               <td class="ticket-id">${link(t)}</td>
               <td>${escapeHtml(t.subject)}</td><td>${escapeHtml(t.instance)}</td><td>${escapeHtml(t.impacto)}</td>
               ${esRes ? `<td>${escapeHtml(t.status)}</td><td>${escapeHtml(t.agentes.join(', ') || 'Sin asignar')}</td>` : ''}
-              <td class="sla-time">${fmtHoras(horasDe(t))}${esRes ? dividido(t) : ''}</td><td class="sla-time">${metaDe(t)} h</td><td>${chip}</td></tr>`;
+              <td class="sla-time">${fmtHorasSLA(horasDe(t))}${esRes ? dividido(t) : ''}</td><td class="sla-time">${metaDe(t)} h</td><td>${chip}</td></tr>`;
           }).join('')}</tbody></table>`
         : (esRes
           ? emptyState('Nada abierto', 'Todos los tickets del periodo ya se cerraron.')
@@ -3454,7 +3470,7 @@
               label: (item) => `${item.raw}% en tiempo`,
               afterLabel: (item) => {
                 const a = agentes[item.dataIndex];
-                return [`${a.cumplido} de ${a.medidos} tickets`, `${esRes ? 'Resolución' : 'Respuesta'} promedio: ${fmtHoras(a.promedioHoras)}`];
+                return [`${a.cumplido} de ${a.medidos} tickets`, `${esRes ? 'Resolución' : 'Respuesta'} promedio: ${fmtHorasSLA(a.promedioHoras)}`];
               }
             } }
           },
@@ -3485,15 +3501,15 @@
               <td class="ticket-id">${link(t)}</td>
               <td>${escapeHtml(t.subject)}</td><td>${escapeHtml(t.instance)}</td><td>${escapeHtml(t.impacto)}</td>
               <td>${escapeHtml(t.agentes.join(', ') || 'Sin asignar')}</td>
-              <td class="sla-time sla-bad">${fmtHoras(horasDe(t))}${esRes ? dividido(t) : ''}</td><td class="sla-time">${metaDe(t)} h</td></tr>`).join('')}</tbody></table>`
+              <td class="sla-time sla-bad">${fmtHorasSLA(horasDe(t))}${esRes ? dividido(t) : ''}</td><td class="sla-time">${metaDe(t)} h</td></tr>`).join('')}</tbody></table>`
         : `<p class="perf-note">Ningún ticket ${esRes ? 'cerrado' : 'tomado'} fuera de tiempo en el periodo.</p>`;
 
       // Nota de cómo se mide
       document.getElementById('slaNota').textContent = esOla
-        ? 'Resolución CAU (OLA) = solo el tiempo que el ticket pasa en Sin asignar y CAU. El reloj se pausa con el cliente y en otras áreas (programación, validación, consultoría, ventas). Mide el desempeño del equipo contra las metas del contrato: Stopper 4 h · Issue 24 h · Nice To Have 72 h. Horas naturales.'
+        ? 'Resolución CAU (OLA) = solo el tiempo que el ticket pasa en Sin asignar y CAU. El reloj se pausa con el cliente y en otras áreas (programación, validación, consultoría, ventas). Mide el desempeño del equipo contra las metas del contrato: Stopper 4 h · Issue 24 h · Nice To Have 72 h. Horas hábiles: lunes a viernes de 9:00 a 19:00 (hora de México), sin días festivos; fuera de ese horario el reloj no corre.'
         : esRes
-        ? 'Resolución según contrato = desde la creación hasta Cerrado, como lo vive el cliente. El reloj solo se pausa mientras el ticket está "Con cliente"; el tiempo en programación, validación y otras áreas sí cuenta. Horas naturales. Stopper 4 h · Issue 24 h · Nice To Have 72 h · Nueva funcionalidad sin SLA. Se usa el impacto más severo; sin impacto se toma como Issue. Los tickets anteriores al histórico aparecen como "sin datos".'
-        : 'Respuesta = cuando el ticket sale de "Sin asignar" (alguien lo toma). Horas naturales. Stopper 4 h · Issue 24 h · Nice To Have 72 h · Nueva funcionalidad sin SLA (según análisis y cotización). Se usa el impacto más severo; sin impacto se toma como Issue. Los tickets anteriores al histórico aparecen como "sin datos".';
+        ? 'Resolución según contrato = desde la creación hasta Cerrado, como lo vive el cliente. El reloj solo se pausa mientras el ticket está "Con cliente"; el tiempo en programación, validación y otras áreas sí cuenta. Horas hábiles: lunes a viernes de 9:00 a 19:00 (hora de México), sin días festivos; fuera de ese horario el reloj no corre. Stopper 4 h · Issue 24 h · Nice To Have 72 h · Nueva funcionalidad sin SLA. Se usa el impacto más severo; sin impacto se toma como Issue. Los tickets anteriores al histórico aparecen como "sin datos".'
+        : 'Respuesta = cuando el ticket sale de "Sin asignar" (alguien lo toma). Horas hábiles: lunes a viernes de 9:00 a 19:00 (hora de México), sin días festivos; fuera de ese horario el reloj no corre. Stopper 4 h · Issue 24 h · Nice To Have 72 h · Nueva funcionalidad sin SLA (según análisis y cotización). Se usa el impacto más severo; sin impacto se toma como Issue. Los tickets anteriores al histórico aparecen como "sin datos".';
     }
 
     async function loadTickets(params) {
