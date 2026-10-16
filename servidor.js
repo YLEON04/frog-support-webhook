@@ -1293,8 +1293,12 @@ app.get('/api/sla', async (req, res) => {
           : clasificarAbierto(acumulado.cau, metaResolucion);
       }
 
-      const agentes = (t.assigned_agent ? t.assigned_agent.toString().split('|') : [])
-        .map(v => agentMap[v.trim()]).filter(Boolean);
+      const idsAsignados = (t.assigned_agent ? t.assigned_agent.toString().split('|') : []).map(v => v.trim());
+      const agentes = idsAsignados.map(id => agentMap[id]).filter(Boolean);
+      // Para la gráfica por agente: solo el equipo del CAU (sin la líder, igual que en Carga de trabajo)
+      const agentesEquipo = idsAsignados
+        .filter(id => CAU_AGENT_IDS.includes(id) && !NO_SUGERIR.includes(id))
+        .map(id => agentMap[id]).filter(Boolean);
 
       return {
         id: t.ticket_id,
@@ -1302,6 +1306,7 @@ app.get('/api/sla', async (req, res) => {
         instance: t.cust_26 || '-',
         status: t.status_name_es || '-',
         agentes,
+        agentesEquipo,
         impacto: impacto.name,
         cerrado,
         // respuesta
@@ -1345,7 +1350,7 @@ app.get('/api/sla', async (req, res) => {
       return {
         general: resumir(tickets, campoResultado, campoHoras, soloTerminados),
         porImpacto: agrupar(t => [t.impacto]).sort((a, b) => ordenImpacto.indexOf(a.nombre) - ordenImpacto.indexOf(b.nombre)),
-        porAgente: agrupar(t => t.agentes.length ? t.agentes : ['Sin asignar']).sort((a, b) => (b.porcentaje ?? -1) - (a.porcentaje ?? -1)),
+        porAgente: agrupar(t => t.agentesEquipo).sort((a, b) => (b.porcentaje ?? -1) - (a.porcentaje ?? -1)),
         porInstancia: agrupar(t => [t.instance]).filter(g => g.medidos > 0)
           .sort((a, b) => (b.incumplido - a.incumplido) || (a.porcentaje ?? 101) - (b.porcentaje ?? 101)).slice(0, 10)
       };
