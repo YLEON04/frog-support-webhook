@@ -74,7 +74,10 @@ app.post('/webhook/support-candy', async (req, res) => {
     const evento = (req.query.evento || 'estado').toString().toLowerCase();
     const esCambioEstado = evento === 'estado';
     const changeData = esCambioEstado ? rawChange : {};
-    console.log(`📌 Evento: ${evento}`);
+    {
+      const tk = data.ticket || (data.payload && data.payload.ticket) || {};
+      console.log(`📌 Evento: ${evento} · ticket #${tk.id || '?'} · status ${tk.status || '-'} · agente ${tk.assigned_agent || '-'}`);
+    }
 
     // Diagnóstico de webhooks de campos: qué llega realmente
     if (evento !== 'estado') {
