@@ -12,8 +12,36 @@ app.use(express.static(__dirname));
 // Configuración PostgreSQL
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }
+  ssl: { rejectUnauthorized: false },
+  max: 5,                          // conexiones simultáneas (suficiente para el plan gratis)
+  connectionTimeoutMillis: 10000,  // si Supabase no responde en 10 s, se considera error
+  idleTimeoutMillis: 30000,        // cerrar conexiones ociosas antes de que la red las corte
+  keepAlive: true
 });
+
+// Si una conexión ociosa se cae (corte de red), registrarlo en lugar de tumbar el servidor
+pool.on('error', (err) => {
+  console.error('⚠️ Conexión a Supabase interrumpida:', err.code || err.message);
+});
+
+// Reintentos ante fallas momentáneas de red (ETIMEDOUT, ECONNRESET...).
+// Hasta 3 intentos, esperando 1 s y 2 s entre ellos. Errores de SQL no se reintentan.
+const ERRORES_TRANSITORIOS = ['ETIMEDOUT', 'ECONNRESET', 'ECONNREFUSED', 'EPIPE', 'ENOTFOUND', 'EAI_AGAIN', '57P01', '08006', '08001'];
+const esTransitorio = (err) =>
+  ERRORES_TRANSITORIOS.includes(err.code) ||
+  /timeout|terminated unexpectedly|Connection terminated/i.test(err.message || '');
+const queryOriginal = pool.query.bind(pool);
+pool.query = async (...args) => {
+  for (let intento = 1; ; intento++) {
+    try {
+      return await queryOriginal(...args);
+    } catch (err) {
+      if (intento >= 3 || !esTransitorio(err)) throw err;
+      console.warn(`🔁 Supabase no respondió (${err.code || err.message}), reintento ${intento + 1} de 3…`);
+      await new Promise(r => setTimeout(r, intento * 1000));
+    }
+  }
+};
 
 // ===== Estados especiales por NOMBRE (no por ID fijo) =====
 // Los IDs de estatus dependen de cada instalación de Support Candy; aquí se buscan por nombre en sc_statuses
@@ -1746,6 +1774,218 @@ app.delete('/api/instancias/:id', requireEditToken, async (req, res) => {
     console.log(`🗂️ Instancia eliminada: ${result.rows[0].instancia}`);
     res.json({ ok: true });
   } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ===== SALUD DE DATOS =====
+// Detecta tickets que probablemente quedaron desfasados porque un webhook no llegó.
+// Umbrales de "sin movimiento" (días naturales desde la última modificación) según dónde está el ticket:
+const SALUD_DIAS = { espera: 3, cau: 3, cliente: 7, otras: 15 };
+const SALUD_HORAS_SIN_TOMAR = 4; // horas hábiles en "Sin asignar" antes de marcarlo
+
+app.get('/api/salud-datos', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT DISTINCT ON (t.ticket_id)
+        t.ticket_id, t.subject, t.status, t.assigned_agent, t.category, t.cust_26,
+        t.date_created, t.date_updated, s.status_name_es, c.category_name
+      FROM support_candy_tickets t
+      LEFT JOIN sc_statuses s ON s.status_id = t.status
+      LEFT JOIN sc_categories c ON c.category_id = t.category
+      WHERE t.status IS NOT NULL
+        AND t.status NOT IN ${SQL_CERRADO_IDS}
+        AND t.status NOT IN ${SQL_SPAM_IDS}
+        AND ${CAU_AGENT_FILTER}
+      ORDER BY t.ticket_id, t.date_updated DESC
+    `);
+
+    const agentsResult = await pool.query('SELECT agent_id, agent_name FROM sc_agents');
+    const agentMap = {};
+    agentsResult.rows.forEach(a => { agentMap[a.agent_id.toString()] = a.agent_name; });
+
+    const now = new Date();
+    const sinMovimiento = [];
+    const sinTomar = [];
+    const categoriasFaltantes = {};
+
+    result.rows.forEach(t => {
+      const grupo = grupoEstado(t.status_name_es);
+      const agentes = (t.assigned_agent ? t.assigned_agent.toString().split('|') : [])
+        .map(v => agentMap[v.trim()]).filter(Boolean);
+      const base = {
+        id: t.ticket_id,
+        subject: t.subject || '',
+        instance: t.cust_26 || '-',
+        status: t.status_name_es || `Estado ${t.status}`,
+        statusId: t.status,
+        agente: agentes.join(', ') || 'Sin asignar'
+      };
+
+      const dias = Math.max(0, (now - new Date(t.date_updated || t.date_created)) / 86400000);
+      const umbral = SALUD_DIAS[grupo] ?? 7;
+      // Los que siguen en "Sin asignar" se reportan aparte (sinTomar), para no duplicarlos
+      if (grupo !== 'espera' && dias >= umbral) {
+        sinMovimiento.push({ ...base, dias: Math.floor(dias), umbral });
+      }
+
+      if (grupo === 'espera') {
+        const horas = horasHabiles(new Date(t.date_created), now);
+        if (horas >= SALUD_HORAS_SIN_TOMAR) sinTomar.push({ ...base, horasHabiles: Math.round(horas * 10) / 10 });
+      }
+
+      if (t.category && !t.category_name) {
+        (categoriasFaltantes[t.category] = categoriasFaltantes[t.category] || []).push(t.ticket_id);
+      }
+    });
+
+    res.json({
+      umbrales: SALUD_DIAS,
+      horasSinTomar: SALUD_HORAS_SIN_TOMAR,
+      sinMovimiento: sinMovimiento.sort((a, b) => b.dias - a.dias),
+      sinTomar: sinTomar.sort((a, b) => b.horasHabiles - a.horasHabiles),
+      categoriasFaltantes: Object.entries(categoriasFaltantes).map(([id, tickets]) => ({ id: parseInt(id), tickets })),
+      total: sinMovimiento.length + sinTomar.length + Object.keys(categoriasFaltantes).length
+    });
+
+  } catch (error) {
+    console.error('Error en /api/salud-datos:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Corrección manual de un ticket desde el tablero (requiere la clave EDIT_TOKEN)
+app.post('/api/tickets/:id/correccion', requireEditToken, async (req, res) => {
+  try {
+    const ticketId = parseInt(req.params.id);
+    const nuevoStatus = parseInt((req.body || {}).status);
+    const agente = (req.body || {}).agente ? String(req.body.agente).replace(/[^0-9|]/g, '') : null;
+    if (!ticketId || !nuevoStatus) return res.status(400).json({ error: 'Faltan el ticket o el estado' });
+
+    const actual = await pool.query('SELECT status, assigned_agent FROM support_candy_tickets WHERE ticket_id = $1', [ticketId]);
+    if (!actual.rows.length) return res.status(404).json({ error: 'No se encontró el ticket' });
+    const anterior = actual.rows[0];
+
+    const estadosEsp = await getEstadosEspeciales();
+    const esCierre = estadosEsp.cerrado.has(String(nuevoStatus));
+
+    await pool.query(`
+      UPDATE support_candy_tickets SET
+        status = $2,
+        assigned_agent = COALESCE($3, assigned_agent),
+        date_updated = NOW(),
+        date_closed = CASE WHEN $4 THEN COALESCE(date_closed, NOW()) ELSE date_closed END
+      WHERE ticket_id = $1
+    `, [ticketId, nuevoStatus, agente || null, esCierre]);
+
+    if (String(anterior.status) !== String(nuevoStatus)) {
+      const agenteHist = (agente || anterior.assigned_agent || '').toString().split('|')[0] || null;
+      await pool.query(
+        `INSERT INTO ticket_state_history (ticket_id, previous_status, new_status, agent_id, changed_at)
+         VALUES ($1, $2, $3, $4, NOW())`,
+        [ticketId, anterior.status, nuevoStatus, agenteHist]
+      );
+    }
+
+    console.log(`🩺 Corrección manual: ticket #${ticketId} · status ${anterior.status} → ${nuevoStatus}${agente ? ` · agente ${agente}` : ''}`);
+    res.json({ ok: true });
+
+  } catch (error) {
+    console.error('Error en corrección de ticket:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ===== GESTIÓN DE PROBLEMAS (ITIL) =====
+// Detecta incidentes que se repiten para atacar la causa raíz:
+//   - misma instancia + misma categoría (problema local del cliente)
+//   - misma categoría en varias instancias (posible falla del producto)
+// No cuenta solicitudes (categorías que no son fallas) ni nuevas funcionalidades.
+const CATEGORIAS_NO_INCIDENTE = ['requerimiento', 'manuales', 'actualizacion'];
+
+app.get('/api/problemas', async (req, res) => {
+  try {
+    const dias = Math.min(365, Math.max(7, parseInt(req.query.dias) || 30));
+    const minimo = Math.min(20, Math.max(2, parseInt(req.query.min) || 3));
+
+    const result = await pool.query(`
+      SELECT DISTINCT ON (t.ticket_id)
+        t.ticket_id, t.subject, t.cust_26, t.cust_41, t.category, t.date_created,
+        s.status_name_es, c.category_name
+      FROM support_candy_tickets t
+      LEFT JOIN sc_statuses s ON s.status_id = t.status
+      LEFT JOIN sc_categories c ON c.category_id = t.category
+      WHERE t.date_created >= NOW() - ($1 || ' days')::interval
+        AND (t.status IS NULL OR t.status NOT IN ${SQL_SPAM_IDS})
+        AND ${CAU_AGENT_FILTER}
+      ORDER BY t.ticket_id, t.date_updated DESC
+    `, [String(dias)]);
+
+    const impactos = await pool.query('SELECT id, name, sort_order FROM sc_impacts');
+    const impactoPorId = {};
+    impactos.rows.forEach(r => { impactoPorId[r.id.toString()] = r; });
+
+    const tickets = result.rows.map(t => {
+      const imps = (t.cust_41 || '').toString().split(/[^0-9]+/).filter(Boolean)
+        .map(id => impactoPorId[id]).filter(Boolean).sort((a, b) => a.sort_order - b.sort_order);
+      return {
+        id: t.ticket_id,
+        subject: t.subject || '',
+        instancia: t.cust_26 || 'Sin instancia',
+        categoria: t.category_name || (t.category ? `Categoría ${t.category}` : 'Sin categoría'),
+        impacto: imps[0] ? imps[0].name : 'Issue',
+        estado: t.status_name_es || '-',
+        abierto: grupoEstado(t.status_name_es) !== 'cerrado',
+        creado: t.date_created
+      };
+    }).filter(t =>
+      !CATEGORIAS_NO_INCIDENTE.includes(normalizeTxt(t.categoria)) &&
+      normalizeTxt(t.impacto) !== 'nueva funcionalidad'
+    );
+
+    const resumen = (lista) => {
+      const ordenados = [...lista].sort((a, b) => new Date(b.creado) - new Date(a.creado));
+      const stoppers = lista.filter(t => normalizeTxt(t.impacto) === 'stopper').length;
+      return {
+        total: lista.length,
+        abiertos: lista.filter(t => t.abierto).length,
+        stoppers,
+        instancias: [...new Set(lista.map(t => t.instancia))].sort(),
+        primero: ordenados[ordenados.length - 1].creado,
+        ultimo: ordenados[0].creado,
+        // Prioridad para atenderlo: repeticiones + peso extra por Stoppers y por seguir abiertos
+        puntaje: lista.length + stoppers * 2 + lista.filter(t => t.abierto).length * 0.5,
+        tickets: ordenados.map(t => ({ id: t.id, subject: t.subject, instancia: t.instancia, impacto: t.impacto, estado: t.estado, creado: t.creado }))
+      };
+    };
+
+    // 1. Misma instancia + categoría
+    const locales = {};
+    tickets.forEach(t => {
+      if (t.instancia === 'Sin instancia') return;
+      const k = `${t.instancia}||${t.categoria}`;
+      (locales[k] = locales[k] || []).push(t);
+    });
+    const porInstancia = Object.entries(locales)
+      .filter(([, lista]) => lista.length >= minimo)
+      .map(([k, lista]) => {
+        const [instancia, categoria] = k.split('||');
+        return { tipo: 'instancia', instancia, categoria, ...resumen(lista) };
+      })
+      .sort((a, b) => b.puntaje - a.puntaje);
+
+    // 2. Misma categoría en 3 o más instancias
+    const generales = {};
+    tickets.forEach(t => { (generales[t.categoria] = generales[t.categoria] || []).push(t); });
+    const porCategoria = Object.entries(generales)
+      .map(([categoria, lista]) => ({ tipo: 'categoria', categoria, ...resumen(lista) }))
+      .filter(g => g.instancias.filter(i => i !== 'Sin instancia').length >= 3 && g.total >= minimo)
+      .sort((a, b) => b.puntaje - a.puntaje);
+
+    res.json({ dias, minimo, incidentesAnalizados: tickets.length, porInstancia, porCategoria });
+
+  } catch (error) {
+    console.error('Error en /api/problemas:', error.message);
     res.status(500).json({ error: error.message });
   }
 });
