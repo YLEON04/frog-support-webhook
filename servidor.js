@@ -9,6 +9,40 @@ app.use(express.json());
 app.use(cors());
 app.use(express.static(__dirname));
 
+// ===== CACHÉ DE CONSULTAS =====
+// Las respuestas GET de /api/* se reutilizan 2 minutos: si varias personas tienen el tablero abierto,
+// Supabase responde una sola vez en lugar de una por persona (ahorra transferencia y registros).
+// Cualquier escritura (webhook, corrección, instancias) vacía la caché para que los datos se vean al momento.
+const CACHE_TTL_MS = 2 * 60 * 1000;
+const apiCache = new Map();
+const limpiarCache = () => apiCache.clear();
+
+app.use((req, res, next) => {
+  if (req.method !== 'GET' || !req.path.startsWith('/api/')) return next();
+  const key = req.originalUrl;
+  const hit = apiCache.get(key);
+  if (hit && Date.now() - hit.t < CACHE_TTL_MS) {
+    res.set('X-Cache', 'HIT');
+    return res.status(200).type('application/json').send(hit.body);
+  }
+  const jsonOriginal = res.json.bind(res);
+  res.json = (body) => {
+    if (res.statusCode === 200) {
+      if (apiCache.size > 300) apiCache.clear(); // evitar que crezca sin límite
+      apiCache.set(key, { t: Date.now(), body: JSON.stringify(body) });
+    }
+    return jsonOriginal(body);
+  };
+  next();
+});
+
+app.use((req, res, next) => {
+  if (req.method !== 'GET') {
+    res.on('finish', () => { if (res.statusCode < 400) limpiarCache(); });
+  }
+  next();
+});
+
 // Configuración PostgreSQL
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -172,7 +206,20 @@ app.post('/webhook/support-candy', async (req, res) => {
     const etapaAnterior = prevEtapaResult.rows.length ? (prevEtapaResult.rows[0].cust_44 || null) : null;
     const etapaNueva = normalizeMulti(ticket.cust_44);
 
-    await pool.query(query, values);
+    try {
+      await pool.query(query, values);
+    } catch (err) {
+      // Un campo de fecha llegó a una columna que en la base es numérica (pasa con sla, sf_date o cust_34).
+      // Se reintenta sin esos campos para no perder el resto del ticket (estado, agente, impacto...).
+      if (['22P02', '22007', '22008'].includes(err.code)) {
+        console.warn(`⚠️ Ticket #${ticket.id}: un campo de fecha no coincide con su columna (${err.message}). Se guarda sin cust_34, sf_date ni sla.`);
+        const sinFechasOpcionales = [...values];
+        [36, 40, 41].forEach(i => { sinFechasOpcionales[i] = null; }); // cust_34, sf_date, sla
+        await pool.query(query, sinFechasOpcionales);
+      } else {
+        throw err;
+      }
+    }
 
     // GUARDAR EN BITÁCORA DE ETAPAS (solo si la etapa cambió)
     if (etapaNueva && etapaNueva !== etapaAnterior) {
