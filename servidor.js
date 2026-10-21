@@ -5,6 +5,15 @@ const { Pool } = require('pg');
 const cors = require('cors');
 
 const app = express();
+
+// Compresión gzip de las respuestas: reduce 70-80% el ancho de banda de salida (Render cobra arriba de 5 GB/mes).
+// Si la librería no está instalada, el servidor sigue funcionando sin comprimir.
+try {
+  app.use(require('compression')());
+} catch (e) {
+  console.warn('⚠️ compression no está instalada: las respuestas se envían sin comprimir');
+}
+
 app.use(express.json());
 app.use(cors());
 app.use(express.static(__dirname));
@@ -41,6 +50,12 @@ app.use((req, res, next) => {
     res.on('finish', () => { if (res.statusCode < 400) limpiarCache(); });
   }
   next();
+});
+
+// El botón "Actualizar" del tablero llama aquí para ver al momento cambios hechos directo en Supabase
+app.post('/api/cache/limpiar', (req, res) => {
+  limpiarCache();
+  res.json({ ok: true });
 });
 
 // Configuración PostgreSQL
